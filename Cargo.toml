@@ -1,0 +1,65 @@
+[package]
+name = "macpilot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Lightweight macOS cleaner and system monitor: see what fills your disk, clean up safely, control processes, apps and startup items."
+license = "MIT"
+readme = "README.md"
+keywords = ["macos", "cleaner", "disk-usage", "process-manager", "uninstaller"]
+categories = ["command-line-utilities", "filesystem", "gui"]
+exclude = ["target/", "docs/screenshots/*.png"]
+
+[features]
+default = ["gui", "tui"]
+# Native window app (MacPilot.app).
+gui = ["dep:eframe", "dep:egui_extras"]
+# Terminal UI (`macpilot` command).
+tui = ["dep:ratatui"]
+# Developer-only: save window screenshots (MACPILOT_SHOT=path.png) and build the icon generator.
+dev-tools = ["gui", "dep:image"]
+
+[lib]
+name = "macpilot"
+path = "src/lib.rs"
+
+[[bin]]
+name = "macpilot"
+path = "src/main.rs"
+required-features = ["tui"]
+
+[[bin]]
+name = "macpilot-gui"
+path = "src/gui/main.rs"
+required-features = ["gui"]
+
+[[example]]
+name = "make_icon"
+required-features = ["dev-tools"]
+
+[dependencies]
+libc = "0.2"
+rayon = "1.10"
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "user"] }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow"], optional = true }
+egui_extras = { version = "0.36", default-features = false, optional = true }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+# Fast everyday builds: thin LTO, parallel codegen.
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+debug = false
+
+# Smallest/fastest binaries for GitHub releases: `cargo build --profile dist`.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+# Keep debug builds responsive (the UI and the disk scanner are heavy in pure debug).
+[profile.dev.package."*"]
+opt-level = 2
