@@ -103,7 +103,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         } else if it.broken {
                             w::badge(ui, tr("program missing"), C::YELLOW);
                         } else {
-                            w::badge(ui, if it.keep_alive { tr("on demand") } else { tr("idle") }, C::ACCENT);
+                            w::badge(ui, tr("not running"), C::dim(ui));
                         }
                     });
                     let p = it.path.clone();

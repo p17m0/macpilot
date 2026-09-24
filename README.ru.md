@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="Иконка MacPilot">
+  <img src="assets/icon.png" width="160" alt="Иконка MacPilot">
 </p>
 
 <h1 align="center">MacPilot</h1>
@@ -16,6 +16,29 @@
 ---
 
 MacPilot собирает в одном маленьком нативном приложении (около 9 MB, написано на Rust) самое полезное из анализаторов диска, чистильщиков, деинсталляторов и мониторов активности. Он простыми словами объясняет, что нашёл, и **никогда ничего не удаляет навсегда**: всё уходит в Корзину, откуда работает «Вернуть» в Finder.
+
+<p align="center">
+  <img src="docs/screenshots/overview.png" width="860" alt="Обзор с рекомендациями">
+</p>
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/disk_map.png" alt="Карта диска — что занимает место"></td>
+    <td><img src="docs/screenshots/clean.png" alt="Очистка — кэши, логи, мусор разработчика"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Карта диска — что занимает место</sub></td>
+    <td align="center"><sub>Очистка — кэши, логи, мусор разработчика</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/procs.png" alt="Процессы по приложениям"></td>
+    <td><img src="docs/screenshots/apps.png" alt="Приложения — размер, последний запуск, полное удаление"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Процессы по приложениям</sub></td>
+    <td align="center"><sub>Приложения — размер, последний запуск, полное удаление</sub></td>
+  </tr>
+</table>
 
 ## Возможности
 

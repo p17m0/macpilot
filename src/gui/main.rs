@@ -517,8 +517,11 @@ impl Gui {
                         }
                     }
                     let n = pids.len();
-                    let msg =
-                        if sig == libc::SIGKILL { trf("Force quit {0} process(es).", &[&n]) } else { trf("Asked {0} process(es) to quit.", &[&n]) };
+                    let msg = if sig == libc::SIGKILL {
+                        trf("Force quit: {0}.", &[&fmt::n(n as u64, fmt::Noun::Process)])
+                    } else {
+                        trf("Asked to quit: {0}.", &[&fmt::n(n as u64, fmt::Noun::Process)])
+                    };
                     self.toast(msg, Level::Ok);
                 }
                 Err(e) => self.toast(trf("Failed: {0}", &[&e]), Level::Danger),
@@ -526,7 +529,7 @@ impl Gui {
             Msg::Trashed { paths, size, result } => {
                 match result {
                     Ok(()) => {
-                        let what = if paths.len() == 1 { fmt::path(&paths[0]) } else { trf("{0} items", &[&paths.len()]) };
+                        let what = if paths.len() == 1 { fmt::path(&paths[0]) } else { fmt::n(paths.len() as u64, fmt::Noun::Item) };
                         self.toast(
                             trf("Moved to the Trash: {0}. {1} will be freed when you empty the Trash.", &[&what, &fmt::bytes(size)]),
                             Level::Ok,
@@ -978,7 +981,11 @@ impl Gui {
                     ui.label(RichText::new("root").color(C::RED));
                 }
                 ui.label(
-                    RichText::new(trf("{0} processes · up {1}", &[&s.procs.len(), &fmt::duration(sysinfo::System::uptime())])).color(C::dim(ui)),
+                    RichText::new(trf(
+                        "{0} · on for {1}",
+                        &[&fmt::n(s.procs.len() as u64, fmt::Noun::Process), &fmt::duration(sysinfo::System::uptime())],
+                    ))
+                    .color(C::dim(ui)),
                 );
             });
         });

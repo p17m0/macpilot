@@ -14,6 +14,8 @@ pub enum Safety {
     User,
     /// A system process or another user's process: needs explicit confirmation.
     System,
+    /// MacPilot itself: quit it by closing the window.
+    Own,
     /// Vital to macOS: stopping it is blocked.
     Critical,
 }
@@ -24,6 +26,7 @@ impl Safety {
             Safety::User => tr("yours"),
             Safety::System => tr("system"),
             Safety::Critical => tr("critical"),
+            Safety::Own => "MacPilot",
         }
     }
 
@@ -34,7 +37,13 @@ impl Safety {
                 tr("System or another user's process. macOS usually restarts it, but stopping it may cause glitches. Type “yes” to confirm.")
             }
             Safety::Critical => tr("Vital to macOS. Stopping it would freeze the Mac, log you out or restart it — blocked."),
+            Safety::Own => tr("This is MacPilot itself. To quit it, close the window or press ⌘Q."),
         }
+    }
+
+    /// Stopping is not offered.
+    pub fn blocked(self) -> bool {
+        matches!(self, Safety::Critical | Safety::Own)
     }
 }
 
@@ -364,7 +373,10 @@ const CRITICAL: &[&str] = &[
 ];
 
 pub fn classify(pid: u32, name: &str, exe: Option<&Path>, uid: Option<u32>, my_uid: u32, my_pid: u32) -> Safety {
-    if pid <= 1 || pid == my_pid || CRITICAL.contains(&name) {
+    if pid == my_pid {
+        return Safety::Own;
+    }
+    if pid <= 1 || CRITICAL.contains(&name) {
         return Safety::Critical;
     }
     let sys_path = exe.is_some_and(|e| {
@@ -548,7 +560,7 @@ pub fn listening_ports() -> HashMap<u32, Vec<String>> {
                     continue;
                 }
                 let local = val.starts_with("127.") || val.starts_with("[::1]") || val.starts_with("localhost");
-                let entry = format!("{proto} {port}{}", if local { " (local)" } else { "" });
+                let entry = if local { format!("{proto} {port} ({})", tr("local")) } else { format!("{proto} {port}") };
                 let v = m.entry(pid).or_default();
                 if !v.contains(&entry) {
                     v.push(entry);
@@ -568,7 +580,7 @@ mod tests {
     fn classify_processes() {
         assert_eq!(classify(1, "launchd", None, Some(0), 501, 9999), Safety::Critical);
         assert_eq!(classify(300, "WindowServer", None, Some(88), 501, 9999), Safety::Critical);
-        assert_eq!(classify(9999, "macpilot", None, Some(501), 501, 9999), Safety::Critical);
+        assert_eq!(classify(9999, "macpilot", None, Some(501), 501, 9999), Safety::Own);
         assert_eq!(classify(500, "mds", Some(Path::new("/System/Library/mds")), Some(0), 501, 1), Safety::System);
         assert_eq!(classify(600, "node", Some(Path::new("/opt/homebrew/bin/node")), Some(501), 501, 1), Safety::User);
     }

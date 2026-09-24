@@ -176,7 +176,7 @@ impl App {
         while let Ok(Msg::Trashed { paths, size, result }) = self.rx.try_recv() {
             match result {
                 Ok(()) => {
-                    let what = if paths.len() == 1 { fmt::path(&paths[0]) } else { trf("{0} items", &[&paths.len()]) };
+                    let what = if paths.len() == 1 { fmt::path(&paths[0]) } else { fmt::n(paths.len() as u64, fmt::Noun::Item) };
                     self.set_status(
                         trf("Moved to the Trash: {0}. {1} will be freed when you empty the Trash.", &[&what, &fmt::bytes(size)]),
                         Level::Ok,
@@ -371,11 +371,11 @@ impl App {
         } else {
             return;
         };
-        if safety == Safety::Critical {
+        if safety.blocked() {
             let why = pids
                 .iter()
                 .filter_map(|p| self.mon.get(*p))
-                .find(|p| p.safety == Safety::Critical)
+                .find(|p| p.safety.blocked())
                 .map(|p| {
                     if p.pid == self.mon.my_pid {
                         tr("this is MacPilot itself — press q to exit").to_string()
@@ -387,8 +387,11 @@ impl App {
             self.set_status(trf("Blocked: {0}.", &[&why]), Level::Danger);
             return;
         }
-        let what =
-            if pids.len() > 1 { trf("“{0}” — {1} process(es)", &[&name, &pids.len()]) } else { format!("“{name}” (PID {})", pids[0]) };
+        let what = if pids.len() > 1 {
+            format!("“{name}” — {}", fmt::n(pids.len() as u64, fmt::Noun::Process))
+        } else {
+            format!("“{name}” (PID {})", pids[0])
+        };
         let mut lines = vec![(what, Level::Info)];
         let (title, action) = if force {
             lines.push((tr("The process will be killed immediately (SIGKILL).").into(), Level::Warn));
@@ -552,7 +555,7 @@ impl App {
         }
         let st = t.stat.unwrap_or_default();
         let lines = vec![
-            (trf("{0} — {1} items, {2}", &[&fmt::path(&t.path), &children.len(), &fmt::bytes(st.size)]), Level::Info),
+            (format!("{} — {}, {}", fmt::path(&t.path), fmt::n(children.len() as u64, fmt::Noun::Item), fmt::bytes(st.size)), Level::Info),
             (t.hint.to_string(), Level::Info),
             (tr("The contents go to the Trash (the folder itself stays).").into(), Level::Ok),
         ];
@@ -579,8 +582,11 @@ impl App {
                 }
                 if errs.is_empty() {
                     let n = pids.len();
-                    let msg =
-                        if sig == libc::SIGKILL { trf("Force quit {0} process(es).", &[&n]) } else { trf("Asked {0} process(es) to quit.", &[&n]) };
+                    let msg = if sig == libc::SIGKILL {
+                        trf("Force quit: {0}.", &[&fmt::n(n as u64, fmt::Noun::Process)])
+                    } else {
+                        trf("Asked to quit: {0}.", &[&fmt::n(n as u64, fmt::Noun::Process)])
+                    };
                     self.set_status(msg, Level::Ok);
                 } else {
                     self.set_status(trf("Failed: {0}", &[&errs.join("; ")]), Level::Danger);

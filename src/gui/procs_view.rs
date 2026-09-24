@@ -98,7 +98,7 @@ fn toolbar(g: &mut Gui, ui: &mut Ui) {
         let search = ui.add(
             egui::TextEdit::singleline(&mut g.filter)
                 .hint_text(tr("Search: name, PID, app, command…"))
-                .desired_width(300.0)
+                .desired_width(230.0)
                 .margin(egui::Margin::symmetric(8, 6)),
         );
         if g.focus_search {
@@ -214,7 +214,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                     ui.label(RichText::new(gr.pids.len().to_string()).color(if gr.pids.len() >= 200 { C::RED } else { C::dim(ui) }));
                 });
                 row.col(|ui| {
-                    ui.label(RichText::new(format!("{:.1}%", gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
+                    ui.label(RichText::new(fmt::pct(gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
                 });
                 row.col(|ui| mem_cell(ui, gr.mem, max_mem));
                 row.col(|ui| {
@@ -247,7 +247,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                     ui.label(RichText::new(&p.user).color(C::dim(ui)));
                 });
                 row.col(|ui| {
-                    ui.label(RichText::new(format!("{:.1}%", p.cpu)).color(w::cpu_color(ui, p.cpu)));
+                    ui.label(RichText::new(fmt::pct(p.cpu)).color(w::cpu_color(ui, p.cpu)));
                 });
                 row.col(|ui| mem_cell(ui, p.mem, max_mem));
                 row.col(|ui| {
@@ -366,7 +366,7 @@ fn summary(ui: &mut Ui, s: &Snapshot) {
                     ui.label(&gr.label);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if by_cpu {
-                            ui.label(RichText::new(format!("{:.1}%", gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
+                            ui.label(RichText::new(fmt::pct(gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
                         } else {
                             ui.label(RichText::new(fmt::bytes(gr.mem)).color(w::mem_color(ui, gr.mem)));
                         }
@@ -395,6 +395,7 @@ fn safety_block(ui: &mut Ui, s: Safety) {
         Safety::User => "✔",
         Safety::System => "⚠",
         Safety::Critical => "⛔",
+        Safety::Own => "ℹ",
     };
     w::note(ui, w::safety_color(s), &format!("{icon} {}: {}", tr("Safety"), s.label()), s.explain());
 }
@@ -408,7 +409,7 @@ fn ports_block(g: &Gui, ui: &mut Ui, pids: &[u32]) {
         return;
     }
     ui.add_space(8.0);
-    let local = all.iter().all(|p| p.ends_with("(local)"));
+    let local = all.iter().all(|p| p.ends_with(&format!("({})", tr("local"))));
     let text = if local { tr("Listens on this Mac only.") } else { tr("Accepts connections from the network.") };
     w::note(ui, C::PURPLE, &trf("Open ports: {0}", &[&all.join(", ")]), text);
 }
@@ -416,7 +417,7 @@ fn ports_block(g: &Gui, ui: &mut Ui, pids: &[u32]) {
 fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
     ui.label(RichText::new(&gr.label).size(22.0).strong());
     let kind = if gr.app.is_some() { tr("App") } else { tr("Program") };
-    ui.label(RichText::new(format!("{kind} · {}", trf("{0} process(es)", &[&gr.pids.len()]))).color(C::dim(ui)));
+    ui.label(RichText::new(format!("{kind} · {}", fmt::n(gr.pids.len() as u64, fmt::Noun::Process))).color(C::dim(ui)));
     ui.add_space(6.0);
     if let Some(m) = gr.pids.iter().filter_map(|p| s.get(*p)).max_by_key(|p| (p.is_main_app, p.mem)) {
         ui.label(procs::describe(m));
@@ -425,7 +426,7 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
     stats_row(
         ui,
         &[
-            ("CPU", format!("{:.1}%", gr.cpu), w::cpu_color(ui, gr.cpu)),
+            ("CPU", fmt::pct(gr.cpu), w::cpu_color(ui, gr.cpu)),
             (tr("Memory"), fmt::bytes(gr.mem), w::mem_color(ui, gr.mem)),
             (tr("Processes"), gr.pids.len().to_string(), if gr.pids.len() >= 200 { C::RED } else { C::text(ui) }),
         ],
@@ -459,7 +460,7 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
             .horizontal(|ui| {
                 ui.add_sized([56.0, 18.0], egui::Label::new(RichText::new(p.pid.to_string()).color(C::dim(ui))));
                 ui.add_sized([72.0, 18.0], egui::Label::new(RichText::new(fmt::bytes(p.mem)).color(w::mem_color(ui, p.mem))));
-                ui.add_sized([52.0, 18.0], egui::Label::new(RichText::new(format!("{:.1}%", p.cpu)).color(w::cpu_color(ui, p.cpu))));
+                ui.add_sized([52.0, 18.0], egui::Label::new(RichText::new(fmt::pct(p.cpu)).color(w::cpu_color(ui, p.cpu))));
                 ui.add(egui::Label::new(&p.name).truncate());
             })
             .response
@@ -487,7 +488,7 @@ fn proc_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, p: &ProcInfo) {
     stats_row(
         ui,
         &[
-            ("CPU", format!("{:.1}%", p.cpu), w::cpu_color(ui, p.cpu)),
+            ("CPU", fmt::pct(p.cpu), w::cpu_color(ui, p.cpu)),
             (tr("Memory"), fmt::bytes(p.mem), w::mem_color(ui, p.mem)),
             (tr("Disk I/O"), fmt::bytes(p.disk_read + p.disk_write), C::text(ui)),
         ],
@@ -539,7 +540,7 @@ fn proc_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, p: &ProcInfo) {
 }
 
 fn action_buttons(g: &mut Gui, ui: &mut Ui, safety: Safety, is_app: bool, single: Option<&ProcInfo>) {
-    let blocked = safety == Safety::Critical;
+    let blocked = safety.blocked();
     ui.horizontal_wrapped(|ui| {
         let (label, hint) = if is_app {
             (tr("Quit app"), tr("Quits like ⌘Q — the app saves its data and asks about unsaved documents."))
@@ -613,8 +614,8 @@ pub fn ask_stop(g: &mut Gui, force: bool) {
     } else {
         return;
     };
-    if safety == Safety::Critical {
-        let who = pids.iter().filter_map(|p| s.get(*p)).find(|p| p.safety == Safety::Critical);
+    if safety.blocked() {
+        let who = pids.iter().filter_map(|p| s.get(*p)).find(|p| p.safety.blocked());
         let why = match who {
             Some(p) if p.pid == s.my_pid => tr("this is MacPilot itself — just close the window").to_string(),
             Some(p) => trf("“{0}” (PID {1}) is vital to macOS", &[&p.name, &p.pid]),
@@ -624,7 +625,11 @@ pub fn ask_stop(g: &mut Gui, force: bool) {
         return;
     }
     let foreign = !s.is_root() && pids.iter().filter_map(|p| s.get(*p)).any(|p| p.uid != Some(s.my_uid));
-    let what = if pids.len() > 1 { trf("“{0}” — {1} process(es)", &[&name, &pids.len()]) } else { format!("“{name}” (PID {})", pids[0]) };
+    let what = if pids.len() > 1 {
+        format!("“{name}” — {}", fmt::n(pids.len() as u64, fmt::Noun::Process))
+    } else {
+        format!("“{name}” (PID {})", pids[0])
+    };
     let mut lines = vec![(what, Level::Info)];
     let (title, button, action, danger) = if force {
         lines.push((tr("The process will be killed immediately (SIGKILL).").into(), Level::Warn));

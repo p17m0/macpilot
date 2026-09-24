@@ -41,7 +41,7 @@ pub fn count(n: u64) -> String {
     let sep = match lang() {
         Lang::En => ',',
         Lang::Es | Lang::De => '.',
-        Lang::Ru | Lang::Fr => '\u{202F}',
+        Lang::Ru | Lang::Fr => '\u{00A0}',
     };
     let s = n.to_string();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
@@ -54,24 +54,160 @@ pub fn count(n: u64) -> String {
     out
 }
 
-/// Short duration: "3d 4h", "5h 12m".
+/// Short duration for uptimes and run times: "3 d 4 h", "5 h 12 min", "7 min".
 pub fn duration(secs: u64) -> String {
-    let (d, h, m, s) = (secs / 86_400, (secs % 86_400) / 3600, (secs % 3600) / 60, secs % 60);
+    let (d, h, m) = (secs / 86_400, (secs % 86_400) / 3600, (secs % 3600) / 60);
     let (ud, uh, um, us) = match lang() {
-        Lang::Ru => ("д", "ч", "м", "с"),
+        Lang::Ru => ("д", "ч", "мин", "с"),
         Lang::Fr => ("j", "h", "min", "s"),
-        Lang::De => ("T", "Std", "Min", "s"),
-        _ => ("d", "h", "m", "s"),
+        Lang::De => ("T", "Std.", "Min.", "s"),
+        Lang::Es => ("d", "h", "min", "s"),
+        Lang::En => ("d", "h", "min", "s"),
     };
     if d > 0 {
-        format!("{d}{ud} {h}{uh}")
+        format!("{d} {ud} {h} {uh}")
     } else if h > 0 {
-        format!("{h}{uh} {m}{um}")
+        format!("{h} {uh} {m} {um}")
     } else if m > 0 {
-        format!("{m}{um} {s}{us}")
+        format!("{m} {um}")
     } else {
-        format!("{s}{us}")
+        format!("{} {us}", secs % 60)
     }
+}
+
+/// Percentage with one decimal and the local decimal separator: "2.4%", "2,4 %".
+pub fn pct(v: f32) -> String {
+    match lang() {
+        Lang::En => format!("{v:.1}%"),
+        Lang::Fr | Lang::De | Lang::Ru | Lang::Es => format!("{}\u{00A0}%", fmt_float(v as f64, 1)),
+    }
+}
+
+/// Things we count, with their plural forms in every language.
+#[derive(Clone, Copy)]
+pub enum Noun {
+    Process,
+    Item,
+    File,
+    Folder,
+    App,
+    Core,
+    Copy,
+    Project,
+    BuildFolder,
+    DupGroup,
+    Day,
+}
+
+/// "13 processes", "13 процессов", "13 processus"… `dative` selects German dative ("seit 30 Tagen").
+/// (en one, en many, ru [one, few, many], fr [one, many], es [one, many], de [one, many, dative many])
+type Forms = (&'static str, &'static str, [&'static str; 3], [&'static str; 2], [&'static str; 2], [&'static str; 3]);
+
+fn noun_forms(n: Noun) -> Forms {
+    // (en one, en many, ru [one, few, many], fr [one, many], es [one, many], de [one, many, dative many])
+    match n {
+        Noun::Process => (
+            "process",
+            "processes",
+            ["процесс", "процесса", "процессов"],
+            ["processus", "processus"],
+            ["proceso", "procesos"],
+            ["Prozess", "Prozesse", "Prozessen"],
+        ),
+        Noun::Item => (
+            "item",
+            "items",
+            ["объект", "объекта", "объектов"],
+            ["élément", "éléments"],
+            ["elemento", "elementos"],
+            ["Objekt", "Objekte", "Objekten"],
+        ),
+        Noun::File => {
+            ("file", "files", ["файл", "файла", "файлов"], ["fichier", "fichiers"], ["archivo", "archivos"], ["Datei", "Dateien", "Dateien"])
+        }
+        Noun::Folder => {
+            ("folder", "folders", ["папка", "папки", "папок"], ["dossier", "dossiers"], ["carpeta", "carpetas"], ["Ordner", "Ordner", "Ordnern"])
+        }
+        Noun::App => ("app", "apps", ["приложение", "приложения", "приложений"], ["app", "apps"], ["app", "apps"], ["App", "Apps", "Apps"]),
+        Noun::Core => ("core", "cores", ["ядро", "ядра", "ядер"], ["cœur", "cœurs"], ["núcleo", "núcleos"], ["Kern", "Kerne", "Kernen"]),
+        Noun::Copy => ("copy", "copies", ["копия", "копии", "копий"], ["copie", "copies"], ["copia", "copias"], ["Kopie", "Kopien", "Kopien"]),
+        Noun::Project => (
+            "project",
+            "projects",
+            ["проект", "проекта", "проектов"],
+            ["projet", "projets"],
+            ["proyecto", "proyectos"],
+            ["Projekt", "Projekte", "Projekten"],
+        ),
+        Noun::BuildFolder => (
+            "build folder",
+            "build folders",
+            ["папка сборки", "папки сборки", "папок сборки"],
+            ["dossier de build", "dossiers de build"],
+            ["carpeta de compilación", "carpetas de compilación"],
+            ["Build-Ordner", "Build-Ordner", "Build-Ordnern"],
+        ),
+        Noun::DupGroup => (
+            "group of identical files",
+            "groups of identical files",
+            ["группа одинаковых файлов", "группы одинаковых файлов", "групп одинаковых файлов"],
+            ["groupe de fichiers identiques", "groupes de fichiers identiques"],
+            ["grupo de archivos idénticos", "grupos de archivos idénticos"],
+            ["Gruppe identischer Dateien", "Gruppen identischer Dateien", "Gruppen identischer Dateien"],
+        ),
+        Noun::Day => ("day", "days", ["день", "дня", "дней"], ["jour", "jours"], ["día", "días"], ["Tag", "Tage", "Tagen"]),
+    }
+}
+
+fn counted(count: u64, noun: Noun, dative: bool) -> String {
+    let (en1, en2, ru, fr, es, de) = noun_forms(noun);
+    let num = self::count(count);
+    let one = count == 1;
+    let word = match lang() {
+        Lang::En => {
+            if one {
+                en1
+            } else {
+                en2
+            }
+        }
+        Lang::Ru => plural_ru(count as i64, ru[0], ru[1], ru[2]),
+        // French uses the singular for 0 and 1.
+        Lang::Fr => {
+            if count <= 1 {
+                fr[0]
+            } else {
+                fr[1]
+            }
+        }
+        Lang::Es => {
+            if one {
+                es[0]
+            } else {
+                es[1]
+            }
+        }
+        Lang::De => {
+            if one {
+                de[0]
+            } else if dative {
+                de[2]
+            } else {
+                de[1]
+            }
+        }
+    };
+    format!("{num} {word}")
+}
+
+/// A number with its noun: "13 processes", "3 объекта", "1 fichier".
+pub fn n(count: impl Into<u64>, noun: Noun) -> String {
+    counted(count.into(), noun, false)
+}
+
+/// Same, for use after prepositions that need the German dative ("seit 30 Tagen").
+pub fn n_in(count: impl Into<u64>, noun: Noun) -> String {
+    counted(count.into(), noun, true)
 }
 
 /// Path with the home folder shortened to `~`.
@@ -84,6 +220,11 @@ pub fn path(p: &std::path::Path) -> String {
         return format!("~/{}", rest.display());
     }
     p.display().to_string()
+}
+
+/// A scan root for sentences: "Home folder" instead of "~".
+pub fn place(p: &std::path::Path) -> String {
+    if p == crate::home() { crate::tr("Home folder").to_string() } else { path(p) }
 }
 
 /// Russian plural: plural(5, "день", "дня", "дней") → "дней".
@@ -291,9 +432,17 @@ mod tests {
         assert_eq!(plural_ru(22, "a", "b", "c"), "b");
     }
 
+    /// One test for everything language-dependent: the language is a global setting.
     #[test]
-    fn sizes_are_localized() {
+    fn localized_formatting() {
+        set_lang(Lang::Ru);
+        assert_eq!(n(1u64, Noun::Process), "1 процесс");
+        assert_eq!(n(3u64, Noun::Item), "3 объекта");
+        assert_eq!(n(728u64, Noun::Process), "728 процессов");
+        set_lang(Lang::De);
+        assert_eq!(n_in(30u64, Noun::Day), "30 Tagen");
         set_lang(Lang::En);
+        assert_eq!(n(1u64, Noun::App), "1 app");
         assert_eq!(bytes(2_870_000_000), "2.87 GB");
         set_lang(Lang::Fr);
         assert_eq!(bytes(2_870_000_000), "2,87 Go");

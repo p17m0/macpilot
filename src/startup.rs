@@ -52,7 +52,31 @@ fn is_unwanted(label: &str) -> bool {
     .any(|k| l.contains(k))
 }
 
-fn vendor_of(label: &str) -> String {
+/// Vendor shown to the user: the app a startup item belongs to, or a readable name from its label.
+fn vendor_of(label: &str, program: &str) -> String {
+    if let Some(app) = crate::procs::outer_app(Path::new(program)) {
+        return crate::procs::bundle_name(&app);
+    }
+    const KNOWN: &[(&str, &str)] = &[
+        ("mackeeper", "MacKeeper"),
+        ("epicgames", "Epic Games"),
+        ("xk72", "Charles Proxy"),
+        ("carriez", "RustDesk"),
+        ("github.facebook", "Watchman (Meta)"),
+        ("valvesoftware", "Valve (Steam)"),
+        ("google", "Google"),
+        ("microsoft", "Microsoft"),
+        ("adobe", "Adobe"),
+        ("docker", "Docker"),
+        ("cloudflare", "Cloudflare"),
+        ("zoom", "Zoom"),
+        ("browsec", "Browsec"),
+        ("jetbrains", "JetBrains"),
+    ];
+    let l = label.to_lowercase();
+    if let Some((_, name)) = KNOWN.iter().find(|(k, _)| l.contains(k)) {
+        return (*name).to_string();
+    }
     let parts: Vec<&str> = label.split('.').collect();
     let raw = match parts.as_slice() {
         ["homebrew", "mxcl", name, ..] => return format!("Homebrew ({name})"),
@@ -108,7 +132,7 @@ pub fn list() -> Vec<StartupItem> {
                     _ => user_disabled.contains(&label),
                 };
             out.push(StartupItem {
-                vendor: vendor_of(&label),
+                vendor: vendor_of(&label, &program),
                 unwanted: is_unwanted(&label),
                 run_at_load: crate::plist::bool(&xml, "RunAtLoad").unwrap_or(false),
                 keep_alive: crate::plist::bool(&xml, "KeepAlive").unwrap_or(false),
@@ -172,8 +196,9 @@ mod tests {
 
     #[test]
     fn vendors_and_flags() {
-        assert_eq!(vendor_of("com.google.keystone.agent"), "Google");
-        assert_eq!(vendor_of("homebrew.mxcl.mysql"), "Homebrew (mysql)");
+        assert_eq!(vendor_of("com.google.keystone.agent", ""), "Google");
+        assert_eq!(vendor_of("homebrew.mxcl.mysql", "/opt/homebrew/bin/mysqld"), "Homebrew (mysql)");
+        assert_eq!(vendor_of("AmneziaVPN-service", "/Applications/AmneziaVPN.app/Contents/MacOS/svc"), "AmneziaVPN");
         assert!(is_unwanted("com.mackeeper.MacKeeperAgent"));
         assert!(!is_unwanted("com.docker.vmnetd"));
     }

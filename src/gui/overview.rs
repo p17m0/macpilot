@@ -47,7 +47,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         let key = gr.key.clone();
         out.push(Rec {
             color: C::RED,
-            title: trf("“{0}” is running {1} processes", &[&gr.label, &gr.pids.len()]),
+            title: trf("“{0}” is running {1}", &[&gr.label, &fmt::n(gr.pids.len() as u64, fmt::Noun::Process)]),
             text: tr("That is abnormal and usually means the app is stuck in a loop. Quit and reopen it.").into(),
             button: tr("Show"),
             go: Box::new(move |g| {
@@ -66,7 +66,11 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         out.push(Rec {
             color: if s.pressure >= 4 { C::RED } else { C::YELLOW },
             title: tr("Memory is under pressure").into(),
-            text: trf("Swap in use: {0}. Biggest users: {1}.", &[&fmt::bytes(s.swap_used), &names.join(", ")]),
+            text: if s.swap_used > 0 {
+                trf("Swap in use: {0}. Biggest users: {1}.", &[&fmt::bytes(s.swap_used), &names.join(", ")])
+            } else {
+                trf("Biggest users: {0}.", &[&names.join(", ")])
+            },
             button: tr("See processes"),
             go: Box::new(|g| {
                 g.view = ProcView::Apps;
@@ -75,14 +79,12 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         });
     }
 
-    if let Some(hot) =
-        s.procs.iter().filter(|p| p.cpu >= 90.0 && p.safety != macpilot::procs::Safety::Critical).max_by(|a, b| a.cpu.total_cmp(&b.cpu))
-    {
+    if let Some(hot) = s.procs.iter().filter(|p| p.cpu >= 90.0 && !p.safety.blocked()).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
         let pid = hot.pid;
         out.push(Rec {
             color: C::YELLOW,
-            title: trf("“{0}” is using {1}% CPU", &[&hot.name, &format!("{:.0}", hot.cpu)]),
-            text: tr("If it is not doing something you asked for, it may be stuck.").into(),
+            title: trf("“{0}” is using {1} CPU", &[&hot.name, &fmt::pct(hot.cpu)]),
+            text: tr("100% means one fully busy core. If it is not doing something you asked for, it may be stuck.").into(),
             button: tr("Show"),
             go: Box::new(move |g| {
                 g.view = ProcView::Flat;
@@ -137,8 +139,8 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
             color: C::GREEN,
             title: trf("{0} of old build folders", &[&fmt::bytes(junk_size)]),
             text: trf(
-                "{0} projects not changed for {1}+ days still keep node_modules, target, build… They are rebuilt on demand.",
-                &[&old_junk.len(), &g.settings.junk_days],
+                "{0} not changed for {1} still keep node_modules, target, build… They are rebuilt on demand.",
+                &[&fmt::n(old_junk.len() as u64, fmt::Noun::Project), &fmt::n_in(g.settings.junk_days as u64, fmt::Noun::Day)],
             ),
             button: tr("Review"),
             go: Box::new(|g| {
@@ -154,8 +156,8 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
             color: C::YELLOW,
             title: trf("{0} not used for a long time", &[&fmt::bytes(stale)]),
             text: trf(
-                "{0} items were not opened or changed for {1}+ days (photos, video and music are not included).",
-                &[&g.stale.len(), &g.stale_days],
+                "{0} were not opened or changed for more than {1} (photos, video and music are not included).",
+                &[&fmt::n(g.stale.len() as u64, fmt::Noun::Item), &fmt::n_in(g.stale_days as u64, fmt::Noun::Day)],
             ),
             button: tr("Review"),
             go: Box::new(|g| {
@@ -172,7 +174,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         if size > 500_000_000 {
             out.push(Rec {
                 color: C::YELLOW,
-                title: trf("{0} apps not opened for 6+ months", &[&unused.len()]),
+                title: trf("{0} not opened for 6+ months", &[&fmt::n(unused.len() as u64, fmt::Noun::App)]),
                 text: trf("Together they take {0}. Uninstall the ones you do not need, with their leftovers.", &[&fmt::bytes(size)]),
                 button: tr("Review"),
                 go: Box::new(|g| {
@@ -188,7 +190,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
             out.push(Rec {
                 color: C::YELLOW,
                 title: trf("{0} left by removed apps", &[&fmt::bytes(size)]),
-                text: trf("{0} folders in your Library belong to apps that are no longer installed.", &[&o.len()]),
+                text: trf("{0} in your Library belong to apps that are no longer installed.", &[&fmt::n(o.len() as u64, fmt::Noun::Folder)]),
                 button: tr("Review"),
                 go: Box::new(|g| {
                     g.apps_mode = AppsMode::Leftovers;
@@ -242,7 +244,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             let host = sysinfo::System::host_name().unwrap_or_default();
             let os = sysinfo::System::long_os_version().unwrap_or_default();
-            w::header(ui, tr("Overview"), &format!("{host} · {os} · {}", trf("up {0}", &[&fmt::duration(sysinfo::System::uptime())])));
+            w::header(ui, tr("Overview"), &format!("{host} · {os} · {}", trf("on for {0}", &[&fmt::duration(sysinfo::System::uptime())])));
 
             let s = g.snap.clone();
             ui.columns(4, |cols| {
@@ -250,7 +252,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     &mut cols[0],
                     "CPU",
                     format!("{:.0}%", s.cpu_total),
-                    trf("{0} cores", &[&s.cpu_count]),
+                    fmt::n(s.cpu_count as u64, fmt::Noun::Core),
                     s.cpu_total / 100.0,
                     Some(&g.cpu_hist),
                 );
@@ -264,7 +266,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     &mut cols[1],
                     tr("Memory"),
                     fmt::bytes(s.mem_used),
-                    format!("{} {} · {} · swap {}", tr("of"), fmt::bytes(s.mem_total), pressure, fmt::bytes(s.swap_used)),
+                    trf("of {0} · {1} · swap {2}", &[&fmt::bytes(s.mem_total), &pressure, &fmt::bytes(s.swap_used)]),
                     if s.pressure >= 4 {
                         1.0
                     } else if s.pressure >= 2 {
@@ -287,7 +289,14 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                 }
                 let groups = s.groups();
                 let apps = groups.iter().filter(|g| g.app.is_some()).count();
-                stat_card(&mut cols[3], tr("Processes"), s.procs.len().to_string(), trf("{0} apps running", &[&apps]), 0.0, None);
+                stat_card(
+                    &mut cols[3],
+                    tr("Processes"),
+                    s.procs.len().to_string(),
+                    trf("{0} running", &[&fmt::n(apps as u64, fmt::Noun::App)]),
+                    0.0,
+                    None,
+                );
             });
 
             ui.add_space(14.0);

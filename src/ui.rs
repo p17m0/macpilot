@@ -29,6 +29,7 @@ fn safety_color(s: Safety) -> Color {
         Safety::User => Color::Green,
         Safety::System => Color::Yellow,
         Safety::Critical => Color::Red,
+        Safety::Own => Color::Blue,
     }
 }
 
@@ -133,7 +134,7 @@ fn draw_sysline(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("  Swap ", Style::new().fg(DIM)),
         Span::styled(fmt::bytes(m.swap_used()), Style::new().fg(if m.swap_used() > 4_000_000_000 { Color::Yellow } else { Color::Reset })),
         Span::styled(format!("  {} {:.1} {:.1} {:.1}", tr("Load"), la.one, la.five, la.fifteen), Style::new().fg(DIM)),
-        Span::styled(format!("  {}", trf("up {0}", &[&fmt::duration(sysinfo::System::uptime())])), Style::new().fg(DIM)),
+        Span::styled(format!("  {}", trf("on for {0}", &[&fmt::duration(sysinfo::System::uptime())])), Style::new().fg(DIM)),
     ];
     if let Some((avail, total)) = data_volume(app) {
         let pct = avail as f64 / total.max(1) as f64 * 100.0;
@@ -354,7 +355,7 @@ fn draw_proc_detail(f: &mut Frame, app: &App, area: Rect) {
             lines.push(kv(tr("Location"), fmt::path(a)));
         }
         lines.push(kv(tr("Processes"), g.pids.len().to_string()));
-        lines.push(kv("CPU", format!("{:.1}%", g.cpu)));
+        lines.push(kv("CPU", fmt::pct(g.cpu)));
         lines.push(kv(tr("Memory"), fmt::bytes(g.mem)));
         lines.push(Line::from(Span::styled(g.safety.explain(), Style::new().fg(safety_color(g.safety)))));
         lines.push(Line::raw(""));
@@ -386,7 +387,7 @@ fn draw_proc_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.push(kv(tr("Parent"), parent));
         lines.push(kv(tr("Status"), p.status));
         lines.push(kv(tr("Running for"), fmt::duration(p.run_time)));
-        lines.push(kv("CPU", format!("{:.1}%", p.cpu)));
+        lines.push(kv("CPU", fmt::pct(p.cpu)));
         lines.push(kv(tr("Memory"), fmt::bytes(p.mem)));
         lines.push(kv(tr("Program"), p.exe.as_ref().map(|e| fmt::path(e)).unwrap_or(tr("no access").into())));
         if !p.cmd.is_empty() {
@@ -431,20 +432,20 @@ fn draw_disk(f: &mut Frame, app: &mut App, area: Rect) {
                     format!(
                         " ✔ {}",
                         trf(
-                            "Scanned {0}: {1} in {2} files in {3} s",
-                            &[&fmt::path(&sc.root), &fmt::bytes(bytes), &fmt::count(files), &format!("{:.1}", t.as_secs_f32())]
+                            "Scanned {0}: {1}, {2}, {3} s",
+                            &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &format!("{:.1}", t.as_secs_f32())]
                         )
                     ),
                     Style::new().fg(Color::Green),
                 )]
             } else {
                 vec![Span::styled(
-                    format!(" ⠿ {}", trf("Scanning {0}… {1} files, {2}", &[&fmt::path(&sc.root), &fmt::count(files), &fmt::bytes(bytes)])),
+                    format!(" ⠿ {}", trf("{0}: scanning… {1}, {2}", &[&fmt::place(&sc.root), &fmt::n(files, fmt::Noun::File), &fmt::bytes(bytes)])),
                     Style::new().fg(Color::Yellow),
                 )]
             };
             if errs > 0 {
-                v.push(Span::styled(format!("  {}", trf("· no access to {0} folders", &[&fmt::count(errs)])), Style::new().fg(DIM)));
+                v.push(Span::styled(format!("  {}", trf("· no access: {0}", &[&fmt::n(errs, fmt::Noun::Folder)])), Style::new().fg(DIM)));
             }
             Line::from(v)
         }
@@ -479,7 +480,7 @@ fn draw_browse(f: &mut Frame, app: &mut App, area: Rect) {
     let total = app.dir_total().map(|d| d.size).unwrap_or_else(|| app.entries.iter().filter_map(|e| e.size).sum());
     let title = Line::from(vec![
         Span::styled(format!(" {} ", fmt::path(&app.cwd)), Style::new().bold()),
-        Span::styled(format!("{} · {} ", fmt::bytes(total), trf("{0} items", &[&app.entries.len()])), Style::new().fg(DIM)),
+        Span::styled(format!("{} · {} ", fmt::bytes(total), fmt::n(app.entries.len() as u64, fmt::Noun::Item)), Style::new().fg(DIM)),
     ]);
     if let Some(e) = &app.entries_err {
         f.render_widget(Paragraph::new(e.clone()).wrap(Wrap { trim: true }).fg(Color::Red).block(block(title)), area);

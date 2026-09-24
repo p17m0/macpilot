@@ -121,7 +121,7 @@ mod tests {
         for d in dirs {
             for e in std::fs::read_dir(d).unwrap().flatten() {
                 let p = e.path();
-                if p.extension().is_none_or(|x| x != "rs") || p.ends_with("strings.rs") {
+                if p.extension().is_none_or(|x| x != "rs") || p.ends_with("strings.rs") || p.ends_with("i18n.rs") {
                     continue;
                 }
                 let src = std::fs::read_to_string(&p).unwrap();
@@ -156,18 +156,21 @@ mod tests {
         }
     }
 
-    /// Pull string literals that follow `tr(` or `trf(`.
+    /// Pull string literals passed to `tr(` or `trf(` (rustfmt may put a line break after the parenthesis).
     fn extract_keys(src: &str) -> Vec<String> {
         let mut out = Vec::new();
-        for pat in ["tr(\"", "trf(\""] {
+        for pat in ["tr(", "trf("] {
             let mut rest = src;
             while let Some(i) = rest.find(pat) {
-                // Skip identifiers that merely end in "tr", like `attr("`.
+                // Skip identifiers that merely end in "tr", like `attr(`.
                 let before = rest[..i].chars().last();
                 rest = &rest[i + pat.len()..];
                 if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                     continue;
                 }
+                let trimmed = rest.trim_start();
+                let Some(after_quote) = trimmed.strip_prefix('"') else { continue };
+                rest = after_quote;
                 let mut key = String::new();
                 let mut chars = rest.chars();
                 while let Some(c) = chars.next() {

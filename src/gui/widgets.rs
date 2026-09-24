@@ -233,22 +233,36 @@ pub fn nav_item(ui: &mut Ui, selected: bool, icon: Icon, label: &str, badge: Opt
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// The app logo (same design as the app icon).
+/// The app logo — a small version of the app icon (gauge with a colored arc and a sparkle).
 pub fn app_logo(ui: &mut Ui, size: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, size * 0.24, Color32::from_rgb(76, 100, 245));
-    let m = rect.center() + Vec2::new(0.0, size * 0.05);
-    let rr = size * 0.3;
-    let pts: Vec<Pos2> = (0..=20)
-        .map(|i| {
-            let t = std::f32::consts::PI * (5.0 / 6.0) + i as f32 / 20.0 * std::f32::consts::PI * (4.0 / 3.0);
-            m + Vec2::new(t.cos() * rr, t.sin() * rr)
-        })
-        .collect();
-    p.add(egui::Shape::line(pts, Stroke::new(size * 0.08, Color32::WHITE)));
-    p.line_segment([m, m + Vec2::new(size * 0.17, -size * 0.17)], Stroke::new(size * 0.06, Color32::WHITE));
-    p.circle_filled(m, size * 0.06, Color32::WHITE);
+    p.rect_filled(rect.shrink(size * 0.02), size * 0.24, Color32::from_rgb(80, 92, 245));
+    let m = rect.center() + Vec2::new(0.0, size * 0.06);
+    let rr = size * 0.27;
+    let arc = |from: f32, to: f32| -> Vec<Pos2> {
+        (0..=16)
+            .map(|i| {
+                let t = std::f32::consts::PI * (0.75 + 1.5 * (from + (to - from) * i as f32 / 16.0));
+                m + Vec2::new(t.cos() * rr, t.sin() * rr)
+            })
+            .collect()
+    };
+    let w = size * 0.1;
+    p.add(egui::Shape::line(arc(0.64, 1.0), Stroke::new(w, Color32::from_white_alpha(70))));
+    p.add(egui::Shape::line(arc(0.0, 0.32), Stroke::new(w, Color32::from_rgb(70, 225, 140))));
+    p.add(egui::Shape::line(arc(0.32, 0.64), Stroke::new(w, Color32::from_rgb(255, 205, 70))));
+    let na = std::f32::consts::PI * (0.75 + 1.5 * 0.64);
+    p.line_segment([m, m + Vec2::new(na.cos(), na.sin()) * rr * 0.8], Stroke::new(size * 0.06, Color32::WHITE));
+    p.circle_filled(m, size * 0.07, Color32::WHITE);
+    // Sparkle.
+    let c = rect.left_top() + Vec2::new(size * 0.78, size * 0.22);
+    let (a, b) = (size * 0.15, size * 0.035);
+    // Two slim diamonds make a four-point star (each one is convex).
+    for (dx, dy) in [(b, a), (a, b)] {
+        let d = vec![c + Vec2::new(0.0, -dy), c + Vec2::new(dx, 0.0), c + Vec2::new(0.0, dy), c + Vec2::new(-dx, 0.0)];
+        p.add(egui::Shape::convex_polygon(d, Color32::WHITE, Stroke::NONE));
+    }
 }
 
 /// Segmented control.
@@ -394,6 +408,7 @@ pub fn safety_color(s: Safety) -> Color32 {
         Safety::User => C::GREEN,
         Safety::System => C::YELLOW,
         Safety::Critical => C::RED,
+        Safety::Own => C::ACCENT,
     }
 }
 

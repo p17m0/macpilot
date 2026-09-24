@@ -53,13 +53,22 @@ fn system(g: &mut Gui, ui: &mut Ui) {
     ui.add_space(8.0);
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         let cols = ((ui.available_width() / 360.0).floor() as usize).clamp(1, 4);
-        let n = g.targets.len();
+        // Places that do not exist on this Mac are not shown.
+        let shown: Vec<usize> = (0..g.targets.len())
+            .filter(|i| {
+                let t = &g.targets[*i];
+                // Empty places are hidden too; the Trash card always stays.
+                t.kind == Kind::Trash || (t.path.exists() && t.stat.is_none_or(|s| s.size > 0))
+            })
+            .collect();
+        let n = shown.len();
         let mut action: Option<(usize, CardAction)> = None;
         for start in (0..n).step_by(cols) {
             ui.columns(cols, |columns| {
                 for (ci, col) in columns.iter_mut().enumerate() {
-                    let i = start + ci;
-                    if i < n {
+                    let k = start + ci;
+                    if k < n {
+                        let i = shown[k];
                         if let Some(a) = target_card(g, col, i) {
                             action = Some((i, a));
                         }
@@ -158,7 +167,7 @@ fn ask_clean(g: &mut Gui, i: usize) {
     }
     let st = t.stat.unwrap_or_default();
     let mut lines = vec![
-        (trf("{0} — {1} items, {2}", &[&fmt::path(&t.path), &children.len(), &fmt::bytes(st.size)]), Level::Info),
+        (format!("{} — {}, {}", fmt::path(&t.path), fmt::n(children.len() as u64, fmt::Noun::Item), fmt::bytes(st.size)), Level::Info),
         (t.hint.to_string(), Level::Info),
         (tr("The contents go to the Trash (the folder itself stays).").into(), Level::Ok),
     ];
@@ -217,8 +226,8 @@ fn stale_banner(g: &mut Gui, ui: &mut Ui) {
                 if ready {
                     let total: u64 = g.stale.iter().map(|i| i.size).sum();
                     ui.label(trf(
-                        "{0} items · {1} — not opened for {2}+ days. Photos, video and music are not included.",
-                        &[&g.stale.len(), &fmt::bytes(total), &g.stale_days],
+                        "{0} · {1} — not opened for more than {2}. Photos, video and music are not included.",
+                        &[&fmt::n(g.stale.len() as u64, fmt::Noun::Item), &fmt::bytes(total), &fmt::n_in(g.stale_days as u64, fmt::Noun::Day)],
                     ));
                 } else {
                     ui.label(RichText::new(tr("Needs a disk scan — it is running in the background.")).color(C::dim(ui)));
@@ -248,7 +257,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
     }
     partial_note(g, ui);
     let Some(scan) = &g.scan else { return };
-    let root = fmt::path(&scan.root);
+    let root = fmt::place(&scan.root);
     let cutoff = disk::now_unix() - g.settings.junk_days * 86_400;
     let total: u64 = g.junk.iter().map(|j| j.size).sum();
     let old: u64 = g.junk.iter().filter(|j| j.project_modified < cutoff).map(|j| j.size).sum();
@@ -271,7 +280,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new(trf("{0} build and dependency folders in {1}, {2} in total", &[&g.junk.len(), &root, &fmt::bytes(total)]))
+                    RichText::new(trf("{1}: {0}, {2} in total", &[&fmt::n(g.junk.len() as u64, fmt::Noun::BuildFolder), &root, &fmt::bytes(total)]))
                         .color(C::dim(ui)),
                 );
                 ui.label(RichText::new(trf("{0} in inactive projects", &[&fmt::bytes(old)])).size(24.0).strong().color(C::GREEN));
@@ -282,7 +291,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                     let size = checked_size;
                     let paths: Vec<PathBuf> = checked.iter().map(|c| c.0.clone()).collect();
                     let lines = vec![
-                        (trf("{0} folders, {1}", &[&paths.len(), &fmt::bytes(size)]), Level::Info),
+                        (format!("{}, {}", fmt::n(paths.len() as u64, fmt::Noun::Folder), fmt::bytes(size)), Level::Info),
                         (tr("They are recreated by the next build or install (npm install, cargo build, gradle…).").into(), Level::Ok),
                         (tr("Everything goes to the Trash and can be restored until the Trash is emptied.").into(), Level::Ok),
                     ];

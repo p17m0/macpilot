@@ -207,7 +207,10 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
         ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new(trf("{0} folders of apps that are no longer installed", &[&orphans.len()])).color(C::dim(ui)));
+                ui.label(
+                    RichText::new(trf("{0} of apps that are no longer installed", &[&fmt::n(orphans.len() as u64, fmt::Noun::Folder)]))
+                        .color(C::dim(ui)),
+                );
                 ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::YELLOW));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

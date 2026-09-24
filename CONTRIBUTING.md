@@ -38,3 +38,15 @@ User-visible text in code is always English wrapped in `tr("…")` or `trf("… 
 ## Screenshots for the README
 
 Build with `--features dev-tools` and run with `MACPILOT_SHOT=shot.png MACPILOT_PAGE=disk:map MACPILOT_LANG=en` — the app captures itself and exits. Please use a test account so no personal files appear.
+
+## Screenshots
+
+The images in `docs/screenshots/` are taken by the app itself (feature `dev-tools`):
+
+```sh
+cargo build --release --features dev-tools --bin macpilot-gui
+MACPILOT_LANG=en MACPILOT_PAGE=disk:map MACPILOT_SHOT=/tmp/disk_map.png ./target/release/macpilot-gui
+sips -Z 1600 /tmp/disk_map.png --out docs/screenshots/disk_map.png
+```
+
+`MACPILOT_PAGE` takes `overview`, `procs`, `disk`, `disk:map`, `clean`, `clean:dev`, `apps`, `startup` or `settings`.

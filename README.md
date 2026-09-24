@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" width="128" alt="MacPilot icon">
+  <img src="assets/icon.png" width="160" alt="MacPilot icon">
 </p>
 
 <h1 align="center">MacPilot</h1>
@@ -16,6 +16,29 @@
 ---
 
 MacPilot brings together the most useful parts of disk analyzers, cleaners, uninstallers and activity monitors in one small native app (~9 MB), written in Rust. It explains what it finds in plain language, and **it never deletes anything permanently**: everything goes to the Trash, where Finder’s “Put Back” still works.
+
+<p align="center">
+  <img src="docs/screenshots/overview.png" width="860" alt="Overview with recommendations">
+</p>
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/disk_map.png" alt="Disk map — what takes space"></td>
+    <td><img src="docs/screenshots/clean.png" alt="Cleanup — caches, logs, dev junk"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Disk map — what takes space</sub></td>
+    <td align="center"><sub>Cleanup — caches, logs, dev junk</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/procs.png" alt="Processes grouped by app"></td>
+    <td><img src="docs/screenshots/apps.png" alt="Apps — size, last use, full uninstall"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Processes grouped by app</sub></td>
+    <td align="center"><sub>Apps — size, last use, full uninstall</sub></td>
+  </tr>
+</table>
 
 ## Features
 

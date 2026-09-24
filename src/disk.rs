@@ -693,7 +693,10 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
         return (Careful, tr("Cloud folder (iCloud, Dropbox…): removal syncs and deletes it on ALL your devices.").into());
     }
 
-    let safe_tree: [(&str, &str); 16] = [
+    let safe_tree: [(&str, &str); 19] = [
+        ("Library/Developer/Xcode/UserData/Previews", tr("SwiftUI preview data — recreated when needed.")),
+        ("Library/iTunes/iPhone Software Updates", tr("Downloaded iPhone/iPad firmware — downloaded again when needed.")),
+        ("Library/Containers/com.apple.mail/Data/Library/Mail Downloads", tr("Mail attachments you opened — the originals stay in the messages.")),
         ("Library/Caches", tr("App cache — recreated automatically.")),
         ("Library/Logs", tr("Logs — safe to remove.")),
         ("Library/Developer/Xcode/DerivedData", tr("Xcode build files — recreated on the next build.")),
