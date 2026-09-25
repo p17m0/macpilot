@@ -1,6 +1,6 @@
 [package]
 name = "macpilot"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Lightweight macOS cleaner and system monitor: see what fills your disk, clean up safely, control processes, apps and startup items."
@@ -13,7 +13,7 @@ exclude = ["target/", "docs/screenshots/*.png"]
 [features]
 default = ["gui", "tui"]
 # Native window app (MacPilot.app).
-gui = ["dep:eframe", "dep:egui_extras"]
+gui = ["dep:eframe", "dep:egui_extras", "dep:objc2", "dep:objc2-foundation", "dep:objc2-app-kit", "dep:objc2-service-management"]
 # Terminal UI (`macpilot` command).
 tui = ["dep:ratatui"]
 # Developer-only: save window screenshots (MACPILOT_SHOT=path.png) and build the icon generator.
@@ -41,10 +41,14 @@ required-features = ["dev-tools"]
 libc = "0.2"
 rayon = "1.10"
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "user"] }
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow"], optional = true }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "accesskit"], optional = true }
 egui_extras = { version = "0.36", default-features = false, optional = true }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSThread", "NSArray", "NSEnumerator", "NSError"], optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSStatusBar", "NSStatusItem", "NSMenu", "NSMenuItem", "NSButton", "NSControl", "NSView", "NSResponder", "NSWindow", "NSStatusBarButton", "NSRunningApplication", "NSFont", "NSAttributedString", "NSGraphics", "NSImage"], optional = true }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"], optional = true }
 
 # Fast everyday builds: thin LTO, parallel codegen.
 [profile.release]

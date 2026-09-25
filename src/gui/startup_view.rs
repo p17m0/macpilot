@@ -68,7 +68,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     let it = &items[row.index()];
                     row.col(|ui| {
                         let mut on = !it.disabled;
-                        if w::switch(ui, &mut on).on_hover_text(if it.disabled { tr("Turn on") } else { tr("Turn off") }).changed() {
+                        if w::switch(ui, &mut on, &it.label).on_hover_text(if it.disabled { tr("Turn on") } else { tr("Turn off") }).changed() {
                             toggle = Some((it.clone(), on));
                         }
                     });

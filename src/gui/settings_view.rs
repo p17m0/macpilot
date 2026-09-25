@@ -64,7 +64,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 
             let mut auto = g.autostart;
             row(ui, tr("Open at login"), tr("Start MacPilot automatically when you log in."), |ui| {
-                w::switch(ui, &mut auto);
+                w::switch(ui, &mut auto, tr("Open at login"));
             });
             if auto != g.autostart {
                 match autostart::set(auto) {
@@ -73,9 +73,30 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                 }
             }
 
+            if g.autostart && autostart::needs_approval() {
+                w::note(ui, C::YELLOW, tr("Launch at login is switched off in System Settings"), tr("Turn MacPilot on in System Settings → General → Login Items."));
+                if ui.button(tr("Login Items settings…")).clicked() {
+                    crate::mac::open_login_items_settings();
+                }
+            }
+
+            let mut bar = g.settings.menu_bar;
+            row(
+                ui,
+                tr("Show in the menu bar"),
+                tr("CPU and memory at a glance. Closing the window keeps MacPilot there; quit with ⌘Q or from its menu."),
+                |ui| {
+                    w::switch(ui, &mut bar, tr("Show in the menu bar"));
+                },
+            );
+            if bar != g.settings.menu_bar {
+                g.settings.menu_bar = bar;
+                g.save_settings();
+            }
+
             let mut scan = g.settings.scan_on_start;
             row(ui, tr("Scan the home folder at launch"), tr("Needed for the Overview, Cleanup and “Not used” lists. Runs at low priority."), |ui| {
-                w::switch(ui, &mut scan);
+                w::switch(ui, &mut scan, tr("Scan the home folder at launch"));
             });
             if scan != g.settings.scan_on_start {
                 g.settings.scan_on_start = scan;
@@ -129,8 +150,59 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     }
                 });
             });
+            updates(g, ui);
             ui.add_space(10.0);
             ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
         });
     });
+}
+
+fn updates(g: &mut Gui, ui: &mut Ui) {
+    let Some(_) = macpilot::update::repo() else { return };
+    ui.add_space(12.0);
+    if let Some(u) = g.update.clone() {
+        w::card(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(trf("MacPilot {0} is available", &[&u.version])).strong().color(C::GREEN));
+                    ui.label(
+                        RichText::new(trf(
+                            "You have {0}. Download the new version and replace the app in Applications.",
+                            &[&env!("CARGO_PKG_VERSION")],
+                        ))
+                        .size(12.0)
+                        .color(C::dim(ui)),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new(RichText::new(tr("Download")).color(egui::Color32::WHITE)).fill(C::ACCENT)).clicked() {
+                        let _ = std::process::Command::new("open").arg(&u.url).spawn();
+                    }
+                });
+            });
+        });
+        ui.add_space(8.0);
+    }
+    let mut on = g.settings.check_updates;
+    let status = if g.update_checking {
+        tr("Checking…").to_string()
+    } else if let Some(e) = &g.update_error {
+        trf("Could not check: {0}", &[e])
+    } else if g.update.is_none() && g.settings.check_updates {
+        tr("You have the latest version.").to_string()
+    } else {
+        String::new()
+    };
+    let hint = format!("{} {}", tr("Once a day MacPilot asks GitHub for the latest release. Nothing else is sent."), status);
+    row(ui, tr("Check for updates"), &hint, |ui| {
+        w::switch(ui, &mut on, tr("Check for updates"));
+        if ui.add_enabled(!g.update_checking, egui::Button::new(tr("Check now"))).clicked() {
+            g.check_updates();
+        }
+    });
+    if on != g.settings.check_updates {
+        g.settings.check_updates = on;
+        g.save_settings();
+    }
 }

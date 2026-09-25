@@ -18,21 +18,21 @@
 MacPilot brings together the most useful parts of disk analyzers, cleaners, uninstallers and activity monitors in one small native app (~9 MB), written in Rust. It explains what it finds in plain language, and **it never deletes anything permanently**: everything goes to the Trash, where Finder’s “Put Back” still works.
 
 <p align="center">
-  <img src="docs/screenshots/overview.png" width="860" alt="Overview with recommendations">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview_dark.png"><img src="docs/screenshots/overview_light.png" width="860" alt="Overview with recommendations"></picture>
 </p>
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/disk_map.png" alt="Disk map — what takes space"></td>
-    <td><img src="docs/screenshots/clean.png" alt="Cleanup — caches, logs, dev junk"></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/disk_map_dark.png"><img src="docs/screenshots/disk_map_light.png" alt="Disk map — what takes space"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/clean_dark.png"><img src="docs/screenshots/clean_light.png" alt="Cleanup — caches, logs, dev junk"></picture></td>
   </tr>
   <tr>
     <td align="center"><sub>Disk map — what takes space</sub></td>
     <td align="center"><sub>Cleanup — caches, logs, dev junk</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/procs.png" alt="Processes grouped by app"></td>
-    <td><img src="docs/screenshots/apps.png" alt="Apps — size, last use, full uninstall"></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/procs_dark.png"><img src="docs/screenshots/procs_light.png" alt="Processes grouped by app"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps_dark.png"><img src="docs/screenshots/apps_light.png" alt="Apps — size, last use, full uninstall"></picture></td>
   </tr>
   <tr>
     <td align="center"><sub>Processes grouped by app</sub></td>
@@ -61,7 +61,17 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Startup.** All launch agents and daemons: what each one runs, who made it, and whether it is running. Turn items off reversibly (`launchctl disable`). Known adware and broken leftovers are flagged.
 
-**Settings.** Language (English, Français, Español, Deutsch, Русский), appearance, open at login, and the thresholds used by the lists.
+**Apps (drag and drop).** Drop any `.app` on the window to uninstall it with its leftovers, even from Downloads or a disk image. Drop a file or folder to find it on the Disk page.
+
+**Menu bar.** CPU and memory in the menu bar, with disk space and the busiest app in its menu. Closing the window keeps MacPilot there; ⌘Q quits.
+
+**Fast start.** The last scan of your home folder is saved (a compact ~7 MB cache), so results appear instantly at launch while a fresh scan runs in the background.
+
+**Settings.** Language (English, Français, Español, Deutsch, Русский), appearance, open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
+
+**Updates.** Once a day MacPilot asks GitHub for the latest release and shows a note in Settings. Nothing else is sent, and you can turn it off.
+
+**Accessibility.** Works with VoiceOver.
 
 **Terminal app.** `macpilot` has a keyboard-driven terminal UI and quick reports.
 
@@ -83,12 +93,20 @@ MacPilot is built to be hard to misuse:
 
 ### Download
 
-1. Get `MacPilot-<version>-macos-universal.zip` from [Releases](../../releases). It works on Apple Silicon and Intel, macOS 12 or later.
-2. Unzip it and move **MacPilot.app** to **Applications**.
-3. The app is not notarized, so the first time **right-click → Open**, or run:
+1. Get `MacPilot-<version>.dmg` from [Releases](../../releases). It works on Apple Silicon and Intel, macOS 12 or later.
+2. Open it and drag **MacPilot** to **Applications**.
+3. If the release was built without a Developer ID (see [docs/RELEASING.md](docs/RELEASING.md)), macOS warns about an unidentified developer. Open the app the first time with **right-click → Open**, or run:
    ```bash
    xattr -dr com.apple.quarantine /Applications/MacPilot.app
    ```
+
+### Homebrew
+
+```bash
+brew install --cask <you>/tap/macpilot
+```
+
+This installs the app and the `macpilot` terminal command.
 
 ### Build from source
 

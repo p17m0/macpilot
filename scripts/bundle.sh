@@ -20,7 +20,7 @@ done
 VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
 DIST=dist
 APP="$DIST/MacPilot.app"
-rm -rf "$APP" && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+rm -rf "$APP" && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 
 if [[ $UNIVERSAL == 1 ]]; then
   rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
@@ -34,6 +34,9 @@ else
   cp "target/$PROFILE/macpilot-gui" "$APP/Contents/MacOS/MacPilot"
   cp "target/$PROFILE/macpilot" "$DIST/macpilot"
 fi
+
+# The terminal app also ships inside the bundle (Homebrew links it; Contents/MacOS/MacPilot would clash on a case-insensitive disk).
+cp "$DIST/macpilot" "$APP/Contents/Helpers/macpilot"
 
 # Icon: every size macOS asks for, from the 1024 px master.
 ICONSET="$DIST/AppIcon.iconset"
@@ -69,7 +72,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature (required on Apple Silicon). Replace "-" with your Developer ID to sign for distribution.
-codesign --force --deep --sign "${CODESIGN_IDENTITY:--}" "$APP" >/dev/null 2>&1 || true
+# Signing. Without CODESIGN_IDENTITY: an ad-hoc signature (required on Apple Silicon, fine for your own Mac).
+# With CODESIGN_IDENTITY="Developer ID Application: Name (TEAMID)": hardened runtime + secure timestamp,
+# ready for notarization (scripts/release.sh).
+ID="${CODESIGN_IDENTITY:--}"
+if [[ $ID == "-" ]]; then
+  for f in "$APP/Contents/Helpers/macpilot" "$APP" "$DIST/macpilot"; do
+    codesign --force --sign - "$f" >/dev/null 2>&1 || true
+  done
+else
+  # Inside out: nested code first, then the bundle.
+  for f in "$APP/Contents/Helpers/macpilot" "$DIST/macpilot"; do
+    codesign --force --options runtime --timestamp --sign "$ID" "$f"
+  done
+  codesign --force --options runtime --timestamp --entitlements scripts/entitlements.plist --sign "$ID" "$APP"
+  codesign --verify --strict --verbose=1 "$APP"
+  echo "Signed with: $ID"
+fi
 
 echo "Built $APP and $DIST/macpilot (MacPilot $VERSION, profile $PROFILE)"

@@ -302,7 +302,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(tr("Recommendations")).size(17.0).strong());
-                let scanning = g.scan.as_ref().is_some_and(|s| !s.done());
+                let scanning = g.scan.as_ref().is_some_and(|s| !s.done()) || g.rescan.is_some();
                 if scanning || g.apps.is_none() || g.orphans.is_none() {
                     ui.spinner();
                     ui.label(RichText::new(tr("checking your Mac…")).color(C::dim(ui)));

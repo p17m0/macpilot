@@ -18,21 +18,21 @@
 MacPilot собирает в одном маленьком нативном приложении (около 9 MB, написано на Rust) самое полезное из анализаторов диска, чистильщиков, деинсталляторов и мониторов активности. Он простыми словами объясняет, что нашёл, и **никогда ничего не удаляет навсегда**: всё уходит в Корзину, откуда работает «Вернуть» в Finder.
 
 <p align="center">
-  <img src="docs/screenshots/overview.png" width="860" alt="Обзор с рекомендациями">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview_dark.png"><img src="docs/screenshots/overview_light.png" width="860" alt="Обзор с рекомендациями"></picture>
 </p>
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/disk_map.png" alt="Карта диска — что занимает место"></td>
-    <td><img src="docs/screenshots/clean.png" alt="Очистка — кэши, логи, мусор разработчика"></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/disk_map_dark.png"><img src="docs/screenshots/disk_map_light.png" alt="Карта диска — что занимает место"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/clean_dark.png"><img src="docs/screenshots/clean_light.png" alt="Очистка — кэши, логи, мусор разработчика"></picture></td>
   </tr>
   <tr>
     <td align="center"><sub>Карта диска — что занимает место</sub></td>
     <td align="center"><sub>Очистка — кэши, логи, мусор разработчика</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/procs.png" alt="Процессы по приложениям"></td>
-    <td><img src="docs/screenshots/apps.png" alt="Приложения — размер, последний запуск, полное удаление"></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/procs_dark.png"><img src="docs/screenshots/procs_light.png" alt="Процессы по приложениям"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps_dark.png"><img src="docs/screenshots/apps_light.png" alt="Приложения — размер, последний запуск, полное удаление"></picture></td>
   </tr>
   <tr>
     <td align="center"><sub>Процессы по приложениям</sub></td>
@@ -61,7 +61,17 @@ MacPilot собирает в одном маленьком нативном пр
 
 **Автозагрузка.** Все LaunchAgents и LaunchDaemons: что запускается, кто производитель, работает ли сейчас. Отключение обратимо (`launchctl disable`). Нежелательное ПО и «сломанные» записи помечаются.
 
-**Настройки.** Язык (English, Français, Español, Deutsch, Русский), тема, открытие при входе и пороги для списков.
+**Приложения (перетаскиванием).** Перетащи любое `.app` в окно, чтобы удалить его вместе с остатками, даже из «Загрузок» или с образа диска. Перетащи файл или папку, чтобы найти их на странице «Диск».
+
+**Строка меню.** Процессор и память в строке меню, а в её меню — свободное место и самое прожорливое приложение. Если закрыть окно, MacPilot останется там; ⌘Q — выход.
+
+**Быстрый старт.** Последнее сканирование домашней папки сохраняется (компактный кэш ~7 MB), поэтому данные видны сразу при запуске, а свежее сканирование идёт в фоне.
+
+**Настройки.** Язык (English, Français, Español, Deutsch, Русский), тема, открытие при входе (обычный объект входа macOS), строка меню, проверка обновлений и пороги для списков.
+
+**Обновления.** Раз в день MacPilot спрашивает у GitHub номер последней версии и показывает заметку в «Настройках». Больше ничего не отправляется, проверку можно выключить.
+
+**Доступность.** Работает с VoiceOver.
 
 **Терминал.** Команда `macpilot`: интерфейс с управлением клавишами и быстрые отчёты.
 
@@ -81,12 +91,20 @@ MacPilot собирает в одном маленьком нативном пр
 
 ### Скачать
 
-1. Возьми `MacPilot-<версия>-macos-universal.zip` в [Releases](../../releases). Подходит для Apple Silicon и Intel, macOS 12 и новее.
-2. Распакуй и перенеси **MacPilot.app** в **Программы**.
-3. Приложение не нотаризовано, поэтому в первый раз открой его через **правый клик → Открыть** или выполни:
+1. Возьми `MacPilot-<версия>.dmg` в [Releases](../../releases). Подходит для Apple Silicon и Intel, macOS 12 и новее.
+2. Открой его и перетащи **MacPilot** в **Программы**.
+3. Если релиз собран без Developer ID (см. [docs/RELEASING.md](docs/RELEASING.md)), macOS предупредит о неустановленном разработчике. В первый раз открой приложение через **правый клик → Открыть** или выполни:
    ```bash
    xattr -dr com.apple.quarantine /Applications/MacPilot.app
    ```
+
+### Homebrew
+
+```bash
+brew install --cask <you>/tap/macpilot
+```
+
+Ставит приложение и команду `macpilot` для терминала.
 
 ### Собрать из исходников
 

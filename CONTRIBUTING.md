@@ -45,8 +45,12 @@ The images in `docs/screenshots/` are taken by the app itself (feature `dev-tool
 
 ```sh
 cargo build --release --features dev-tools --bin macpilot-gui
-MACPILOT_LANG=en MACPILOT_PAGE=disk:map MACPILOT_SHOT=/tmp/disk_map.png ./target/release/macpilot-gui
-sips -Z 1600 /tmp/disk_map.png --out docs/screenshots/disk_map.png
+MACPILOT_THEME=dark MACPILOT_LANG=en MACPILOT_PAGE=disk:map MACPILOT_SHOT=/tmp/disk_map_dark.png ./target/release/macpilot-gui
+sips -Z 1600 /tmp/disk_map_dark.png --out docs/screenshots/disk_map_dark.png
 ```
 
-`MACPILOT_PAGE` takes `overview`, `procs`, `disk`, `disk:map`, `clean`, `clean:dev`, `apps`, `startup` or `settings`.
+`MACPILOT_PAGE` takes `overview`, `procs`, `disk`, `disk:map`, `clean`, `clean:dev`, `apps`, `startup` or `settings`, and `MACPILOT_THEME` takes `light` or `dark`. The README shows `<name>_light.png` or `<name>_dark.png`, whichever matches the reader's theme. Keep the window in front while it captures: macOS does not draw windows that are covered.
+
+## Releases
+
+See [docs/RELEASING.md](docs/RELEASING.md): tagging, signing with a Developer ID, notarization and the Homebrew cask.

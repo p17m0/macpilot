@@ -2,7 +2,9 @@
 
 use std::collections::VecDeque;
 
-use eframe::egui::{self, Color32, CornerRadius, FontFamily, FontId, Pos2, Rect, RichText, Sense, Stroke, TextStyle, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontFamily, FontId, Pos2, Rect, RichText, Sense, Stroke, TextStyle, Ui, Vec2, WidgetInfo, WidgetType,
+};
 use macpilot::disk::DelSafety;
 use macpilot::procs::Safety;
 use macpilot::tr;
@@ -230,6 +232,12 @@ pub fn nav_item(ui: &mut Ui, selected: bool, icon: Icon, label: &str, badge: Opt
         p.rect_filled(br, 9, C::RED);
         p.text(br.center(), egui::Align2::CENTER_CENTER, n.to_string(), FontId::proportional(11.0), Color32::WHITE);
     }
+    // Painted by hand, so tell VoiceOver what it is.
+    let spoken = match badge {
+        Some(n) => format!("{label}, {n}"),
+        None => label.to_string(),
+    };
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, selected, &spoken));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -275,7 +283,9 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
                 let sel = *value == *v;
                 let text = RichText::new(*label).color(if sel { C::text(ui) } else { C::dim(ui) });
                 let b = egui::Button::new(text).fill(if sel { C::card(ui) } else { Color32::TRANSPARENT }).corner_radius(6).stroke(Stroke::NONE);
-                if ui.add(b).clicked() && !sel {
+                let r = ui.add(b);
+                r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, sel, *label));
+                if r.clicked() && !sel {
                     *value = *v;
                     changed = true;
                 }
@@ -285,13 +295,15 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
     changed
 }
 
-/// iOS-style switch.
-pub fn switch(ui: &mut Ui, on: &mut bool) -> egui::Response {
+/// iOS-style switch. `label` is what VoiceOver reads.
+pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> egui::Response {
     let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(38.0, 22.0), Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
+    let state = *on;
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, state, label));
     let t = ui.ctx().animate_bool_responsive(resp.id, *on);
     let p = ui.painter();
     let bg = if *on { C::GREEN } else { C::track(ui) };
@@ -314,7 +326,8 @@ pub fn ratio_color(r: f32) -> Color32 {
 /// Meter in the sidebar: title, value, and a sparkline or a bar.
 pub fn side_meter(ui: &mut Ui, title: &str, value: &str, ratio: f32, hist: Option<&VecDeque<f32>>) {
     let size = Vec2::new(ui.available_width(), 44.0);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, format!("{title}: {value}")));
     let color = ratio_color(ratio);
     let p = ui.painter();
     p.rect_filled(rect, 8, C::card(ui));
@@ -398,6 +411,7 @@ pub fn badge(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(11.0), color);
     let size = galley.size() + Vec2::new(12.0, 4.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
     ui.painter().rect_filled(rect, 5, color.gamma_multiply(0.16));
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
     resp

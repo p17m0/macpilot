@@ -10,24 +10,55 @@ permissions:
 jobs:
   release:
     runs-on: macos-latest
+    env:
+      # All optional. Without them the release is ad-hoc signed and not notarized.
+      # See docs/RELEASING.md for how to create each one.
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - name: Build universal app
-        run: scripts/bundle.sh --universal
-      - name: Package
+
+      - name: Import the Developer ID certificate
+        if: env.MACOS_CERTIFICATE != ''
         run: |
-          cd dist
-          ditto -c -k --keepParent MacPilot.app "MacPilot-${GITHUB_REF_NAME}-macos-universal.zip"
-          tar -czf "macpilot-cli-${GITHUB_REF_NAME}-macos-universal.tar.gz" macpilot
-          shasum -a 256 *.zip *.tar.gz > SHA256SUMS.txt
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          KC_PW="$(uuidgen)"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          ID=$(security find-identity -v -p codesigning "$KC" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+          test -n "$ID" || { echo "No Developer ID Application identity in the certificate"; exit 1; }
+          echo "CODESIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+
+      - name: Prepare the App Store Connect API key
+        if: env.APPLE_API_KEY != ''
+        run: |
+          echo "$APPLE_API_KEY" > "$RUNNER_TEMP/api_key.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/api_key.p8" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize and package
+        run: scripts/release.sh "$GITHUB_REF_NAME"
+
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
+            dist/*.dmg
             dist/*.zip
             dist/*.tar.gz
             dist/SHA256SUMS.txt

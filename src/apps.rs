@@ -57,6 +57,22 @@ fn app_dirs() -> Vec<PathBuf> {
     vec![PathBuf::from("/Applications"), home().join("Applications")]
 }
 
+/// Details of one app bundle. `spot_used` is the last use Spotlight knows of, if any.
+pub fn info(p: &Path, spot_used: Option<i64>) -> AppInfo {
+    let xml = crate::plist::read_xml(&p.join("Contents/Info.plist")).unwrap_or_default();
+    let bundle_id = crate::plist::string(&xml, "CFBundleIdentifier").unwrap_or_default();
+    let version = crate::plist::string(&xml, "CFBundleShortVersionString").unwrap_or_default();
+    let exe = crate::plist::string(&xml, "CFBundleExecutable");
+    let name = p.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let exe_used = exe.and_then(|e| std::fs::metadata(p.join("Contents/MacOS").join(e)).ok()).map(|m| crate::disk::used_time(&m));
+    let last_used = match (spot_used, exe_used) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    };
+    let protected = bundle_id == "com.apple.Safari" || p.starts_with("/System");
+    AppInfo { path: p.to_path_buf(), name, bundle_id, version, size: crate::disk::measure(p).size, last_used, protected }
+}
+
 /// All installed apps (in /Applications and ~/Applications, one folder level deep).
 pub fn list() -> Vec<AppInfo> {
     let mut bundles = Vec::new();
@@ -75,25 +91,7 @@ pub fn list() -> Vec<AppInfo> {
         }
     }
     let spot = spotlight_last_used();
-    let mut apps: Vec<AppInfo> = crate::disk::apps_pool().install(|| {
-        bundles
-            .par_iter()
-            .map(|p| {
-                let xml = crate::plist::read_xml(&p.join("Contents/Info.plist")).unwrap_or_default();
-                let bundle_id = crate::plist::string(&xml, "CFBundleIdentifier").unwrap_or_default();
-                let version = crate::plist::string(&xml, "CFBundleShortVersionString").unwrap_or_default();
-                let exe = crate::plist::string(&xml, "CFBundleExecutable");
-                let name = p.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                let exe_used = exe.and_then(|e| std::fs::metadata(p.join("Contents/MacOS").join(e)).ok()).map(|m| crate::disk::used_time(&m));
-                let last_used = match (spot.get(p).copied(), exe_used) {
-                    (Some(a), Some(b)) => Some(a.max(b)),
-                    (a, b) => a.or(b),
-                };
-                let protected = bundle_id == "com.apple.Safari" || p.starts_with("/System");
-                AppInfo { path: p.clone(), name, bundle_id, version, size: crate::disk::measure(p).size, last_used, protected }
-            })
-            .collect()
-    });
+    let mut apps: Vec<AppInfo> = crate::disk::apps_pool().install(|| bundles.par_iter().map(|p| info(p, spot.get(p).copied())).collect());
     apps.sort_by_key(|a| std::cmp::Reverse(a.size));
     apps
 }

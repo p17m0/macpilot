@@ -1,6 +1,10 @@
-//! Launch at login via a LaunchAgent in ~/Library/LaunchAgents.
+//! Launch at login. On macOS 13+ MacPilot registers itself with `SMAppService`, so it appears in
+//! System Settings → General → Login Items like any other app. On macOS 12, or when not running
+//! from an app bundle, it falls back to a LaunchAgent in ~/Library/LaunchAgents.
 
 use std::path::PathBuf;
+
+use crate::mac;
 
 const LABEL: &str = "local.macpilot";
 
@@ -14,10 +18,34 @@ fn app_path() -> PathBuf {
 }
 
 pub fn enabled() -> bool {
-    plist_path().exists()
+    if mac::login_item_supported() { mac::login_item() != mac::LoginItem::Off } else { legacy_enabled() }
+}
+
+/// Registered, but switched off by the user in System Settings → Login Items.
+pub fn needs_approval() -> bool {
+    mac::login_item_supported() && mac::login_item() == mac::LoginItem::NeedsApproval
 }
 
 pub fn set(on: bool) -> Result<(), String> {
+    if mac::login_item_supported() {
+        set_legacy(false)?;
+        return mac::set_login_item(on);
+    }
+    set_legacy(on)
+}
+
+/// Move a LaunchAgent made by older versions to a proper login item.
+pub fn migrate() {
+    if mac::login_item_supported() && legacy_enabled() && mac::set_login_item(true).is_ok() {
+        let _ = set_legacy(false);
+    }
+}
+
+fn legacy_enabled() -> bool {
+    plist_path().exists()
+}
+
+fn set_legacy(on: bool) -> Result<(), String> {
     let p = plist_path();
     if !on {
         return match std::fs::remove_file(&p) {

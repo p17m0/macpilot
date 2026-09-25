@@ -41,7 +41,6 @@ fn header(g: &mut Gui, ui: &mut Ui) {
             let r = used as f32 / total.max(1) as f32;
             ui.horizontal(|ui| {
                 ui.label(RichText::new(tr("Startup disk")).strong().size(15.0));
-                ui.label(RichText::new(trf("{0} of {1} used", &[&fmt::bytes(used), &fmt::bytes(total)])).color(C::dim(ui)));
                 ui.label(RichText::new(trf("{0} free", &[&fmt::bytes(avail)])).strong().size(15.0).color(w::ratio_color(r)));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(tr("Whole disk")).on_hover_text(tr("Scan everything from / (needs Full Disk Access)")).clicked() {
@@ -59,6 +58,8 @@ fn header(g: &mut Gui, ui: &mut Ui) {
             ui.add_space(4.0);
             let width = ui.available_width();
             w::bar(ui, r, egui::vec2(width, 10.0), w::ratio_color(r));
+            ui.add_space(2.0);
+            ui.label(RichText::new(trf("{0} of {1} used", &[&fmt::bytes(used), &fmt::bytes(total)])).color(C::dim(ui)));
         }
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| match &g.scan {
@@ -66,7 +67,18 @@ fn header(g: &mut Gui, ui: &mut Ui) {
                 let files = sc.shared.files.load(Ordering::Relaxed);
                 let bytes = sc.shared.bytes.load(Ordering::Relaxed);
                 let errs = sc.shared.errors.load(Ordering::Relaxed);
-                if let Some(t) = sc.finished_in {
+                if let Some(at) = sc.cached_at {
+                    let bytes = sc.dir(&sc.root).map(|d| d.size).unwrap_or(bytes);
+                    ui.label(trf(
+                        "{0}: {1}, {2} · last scan {3}",
+                        &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &fmt::ago(at)],
+                    ));
+                    if let Some(fresh) = &g.rescan {
+                        ui.spinner();
+                        let n = fresh.shared.files.load(Ordering::Relaxed);
+                        ui.label(RichText::new(trf("updating… {0}", &[&fmt::n(n, fmt::Noun::File)])).color(C::dim(ui)));
+                    }
+                } else if let Some(t) = sc.finished_in {
                     ui.label(RichText::new("✔").color(C::GREEN));
                     ui.label(trf(
                         "Scanned {0}: {1}, {2}, {3} s",
@@ -414,6 +426,8 @@ fn map(g: &mut Gui, ui: &mut Ui) {
         let e = &g.entries[*idx];
         let r = tile.shrink(1.5);
         let resp = ui.interact(r, ui.id().with(("tile", &e.path)), Sense::click());
+        let spoken = format!("{}, {}", e.name, fmt::bytes(*size));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &spoken));
         let mut color = tile_color(&e.name, e.is_dir, dark);
         if resp.hovered() {
             color = color.gamma_multiply(1.15);

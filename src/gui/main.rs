@@ -4,6 +4,7 @@ mod apps_view;
 mod autostart;
 mod clean_view;
 mod disk_view;
+mod mac;
 mod overview;
 mod procs_view;
 mod settings_view;
@@ -118,6 +119,7 @@ pub enum Msg {
     Startup(Vec<StartupItem>),
     StartupChanged(Result<(), String>),
     TrashEmptied(Result<(), String>),
+    Update(Result<Option<macpilot::update::Release>, String>),
 }
 
 pub struct Gui {
@@ -149,6 +151,8 @@ pub struct Gui {
 
     // Disk
     pub scan: Option<Scan>,
+    /// Fresh scan running in the background while `scan` shows cached results.
+    pub rescan: Option<Scan>,
     pub cwd: PathBuf,
     pub entries: Vec<Entry>,
     pub entries_err: Option<String>,
@@ -189,6 +193,14 @@ pub struct Gui {
 
     pub autostart: bool,
     pub full_disk_access: bool,
+    /// Menu bar item: when it was last updated.
+    last_status: Option<Instant>,
+    /// Update check: a newer release, the last error, and when it last ran.
+    pub update: Option<macpilot::update::Release>,
+    pub update_error: Option<String>,
+    pub update_checking: bool,
+    update_checked: Option<Instant>,
+    started: Instant,
     /// Scan progress watchdog: macOS blocks file access while a permission dialog is open.
     scan_files_seen: u64,
     scan_last_progress: Instant,
@@ -304,6 +316,7 @@ impl Gui {
             sel: None,
             focus_search: false,
             scan: None,
+            rescan: None,
             cwd: home.clone(),
             entries: Vec::new(),
             entries_err: None,
@@ -333,7 +346,16 @@ impl Gui {
             leftover_checked: HashSet::new(),
             apps_filter: String::new(),
             startup: None,
-            autostart: autostart::enabled(),
+            autostart: {
+                autostart::migrate();
+                autostart::enabled()
+            },
+            last_status: None,
+            update: None,
+            update_error: None,
+            update_checking: false,
+            update_checked: None,
+            started: Instant::now(),
             full_disk_access: macpilot::has_full_disk_access(),
             scan_files_seen: 0,
             scan_last_progress: Instant::now(),
@@ -342,7 +364,7 @@ impl Gui {
             settings,
         };
         if g.settings.scan_on_start {
-            g.start_scan(home);
+            g.start_home_scan();
         }
         g.dev_setup();
         g
@@ -352,6 +374,11 @@ impl Gui {
     fn dev_setup(&mut self) {
         if let Ok(p) = std::env::var("MACPILOT_SHOT") {
             self.shot = Some(Shot { path: PathBuf::from(p), started: Instant::now(), requested: false, sent: false });
+        }
+        match std::env::var("MACPILOT_THEME").as_deref() {
+            Ok("dark") => apply_theme(&self.ctx, Theme::Dark),
+            Ok("light") => apply_theme(&self.ctx, Theme::Light),
+            _ => {}
         }
         let Ok(page) = std::env::var("MACPILOT_PAGE") else { return };
         let (page, sub) = page.split_once(':').unwrap_or((page.as_str(), ""));
@@ -387,7 +414,7 @@ impl Gui {
     pub fn go_page(&mut self, p: Page) {
         self.page = p;
         if matches!(p, Page::Disk | Page::Clean | Page::Overview) && self.scan.is_none() {
-            self.start_scan(macpilot::home());
+            self.start_home_scan();
         }
     }
 
@@ -460,10 +487,27 @@ impl Gui {
         if let Some(s) = &mut self.scan {
             if s.done() && s.finished_in.is_none() {
                 s.finished_in = Some(s.started.elapsed());
+                if s.root == macpilot::home() {
+                    s.save_cache();
+                }
                 self.stale_dirty = true;
                 self.junk_dirty = true;
                 self.reload_dir();
             }
+        }
+        // The fresh scan replaces the cached results once it is complete.
+        if self.rescan.as_ref().is_some_and(|s| s.done()) {
+            if let Some(mut fresh) = self.rescan.take() {
+                fresh.finished_in = Some(fresh.started.elapsed());
+                fresh.save_cache();
+                self.scan = Some(fresh);
+                self.stale_dirty = true;
+                self.junk_dirty = true;
+                self.reload_dir();
+            }
+        }
+        if self.rescan.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(500));
         }
         self.refresh_stale();
         self.refresh_junk();
@@ -472,17 +516,45 @@ impl Gui {
                 self.toast = None;
             }
         }
+        self.update_menu_bar();
+        // Once a day (the app may run for weeks in the menu bar); the first check a little after launch.
+        let due = match self.update_checked {
+            None => self.started.elapsed() > Duration::from_secs(20),
+            Some(t) => t.elapsed() > Duration::from_secs(24 * 3600),
+        };
+        if due && self.settings.check_updates && macpilot::update::repo().is_some() {
+            self.check_updates();
+        }
         ctx.request_repaint_after(Duration::from_millis(1000));
     }
 
     fn on_msg(&mut self, m: Msg) {
         match m {
+            Msg::Update(r) => {
+                self.update_checking = false;
+                match r {
+                    Ok(u) => {
+                        self.update = u;
+                        self.update_error = None;
+                    }
+                    Err(e) => self.update_error = Some(e),
+                }
+            }
             Msg::Measured(i, st) => {
                 if let Some(t) = self.targets.get_mut(i) {
                     t.stat = Some(st);
                 }
             }
-            Msg::Apps(a) => self.apps = Some(a),
+            Msg::Apps(mut a) => {
+                // Keep an app that was dropped on the window before the list was ready.
+                if let Some(sel) = self.app_sel.as_ref().filter(|p| p.is_dir() && !a.iter().any(|x| &x.path == *p)) {
+                    a.insert(0, macpilot::apps::info(sel, None));
+                }
+                if let Some(x) = self.app_sel.as_ref().and_then(|p| a.iter().find(|x| &x.path == p)).cloned() {
+                    self.load_leftovers(&x);
+                }
+                self.apps = Some(a);
+            }
             Msg::Orphans(o) => self.orphans = Some(o),
             Msg::Leftovers(app, l) => {
                 // Everything found is pre-selected, except very large folders (games, documents).
@@ -545,7 +617,7 @@ impl Gui {
     /// Update every list after items went to the Trash.
     fn after_trash(&mut self, paths: &[PathBuf]) {
         let gone: Vec<PathBuf> = paths.iter().filter(|p| std::fs::symlink_metadata(p).is_err()).cloned().collect();
-        if let Some(scan) = &self.scan {
+        for scan in self.scan.iter().chain(self.rescan.iter()) {
             for p in &gone {
                 let st = scan.size_of(p).unwrap_or_default();
                 scan.forget(p, st.size, st.files);
@@ -699,7 +771,108 @@ impl Gui {
     // Disk
     // ------------------------------------------------------------------
 
+    /// Drop an app on the window to uninstall it (like AppCleaner), or a file or folder to find it on the disk.
+    fn handle_drop(&mut self, ctx: &egui::Context) {
+        let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        if hovering {
+            let rect = ctx.content_rect();
+            let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop")));
+            p.rect_filled(rect, 0, Color32::from_black_alpha(150));
+            let inner = rect.shrink(24.0);
+            p.rect_stroke(inner, 16, egui::Stroke::new(3.0, widgets::C::ACCENT), egui::StrokeKind::Inside);
+            p.text(inner.center(), egui::Align2::CENTER_CENTER, tr("Drop an app to uninstall it"), egui::FontId::proportional(26.0), Color32::WHITE);
+            p.text(
+                inner.center() + egui::vec2(0.0, 36.0),
+                egui::Align2::CENTER_CENTER,
+                tr("or a file or folder to see it on the disk"),
+                egui::FontId::proportional(15.0),
+                Color32::from_gray(220),
+            );
+        }
+        let Some(path) = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty())) else {
+            return;
+        };
+        let is_app = path.extension().is_some_and(|x| x.eq_ignore_ascii_case("app")) && path.is_dir();
+        if is_app {
+            self.go_page(Page::Apps);
+            self.apps_mode = AppsMode::Installed;
+            // An app outside the Applications folders (Downloads, a disk image…) is added to the list.
+            if let Some(apps) = &mut self.apps {
+                if !apps.iter().any(|a| a.path == path) {
+                    apps.insert(0, macpilot::apps::info(&path, None));
+                }
+                if let Some(a) = apps.iter().find(|a| a.path == path).cloned() {
+                    self.load_leftovers(&a);
+                }
+            }
+            self.app_sel = Some(path);
+        } else if let Some(parent) = path.parent() {
+            self.go_page(Page::Disk);
+            self.disk_mode = DiskMode::List;
+            self.go(parent.to_path_buf());
+            self.disk_sel = Some(path);
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    pub fn check_updates(&mut self) {
+        if self.update_checking {
+            return;
+        }
+        self.update_checking = true;
+        self.update_checked = Some(Instant::now());
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Update(macpilot::update::check()));
+            ctx.request_repaint();
+        });
+    }
+
+    /// CPU and memory in the menu bar, refreshed every two seconds.
+    fn update_menu_bar(&mut self) {
+        if !self.settings.menu_bar {
+            if self.last_status.take().is_some() {
+                mac::set_status(None);
+            }
+            return;
+        }
+        if self.last_status.is_some_and(|t| t.elapsed() < Duration::from_secs(2)) {
+            return;
+        }
+        self.last_status = Some(Instant::now());
+        let s = &self.snap;
+        let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
+        let mut lines =
+            vec![trf("CPU: {0}", &[&fmt::pct(s.cpu_total)]), trf("Memory: {0} of {1}", &[&fmt::bytes(s.mem_used), &fmt::bytes(s.mem_total)])];
+        if let Some((avail, total)) = widgets::data_volume(&self.disks) {
+            lines.push(trf("Disk: {0} free of {1}", &[&fmt::bytes(avail), &fmt::bytes(total)]));
+        }
+        if let Some(p) = s.procs.iter().filter(|p| p.cpu >= 20.0).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
+            lines.push(trf("Busiest: {0} — {1} CPU", &[&p.app_name().unwrap_or_else(|| p.name.clone()), &fmt::pct(p.cpu)]));
+        } else {
+            lines.push(tr("Nothing is using much CPU").to_string());
+        }
+        let title = format!("{:.0}% · {:.0}%", s.cpu_total, mem_r * 100.0);
+        mac::set_status(Some(mac::StatusInfo { title: &title, lines: &lines, open_label: tr("Open MacPilot"), quit_label: tr("Quit MacPilot") }));
+    }
+
+    /// Home folder: show the last saved results at once and refresh them in the background.
+    pub fn start_home_scan(&mut self) {
+        let home = macpilot::home();
+        match Scan::load_cache(&home) {
+            Some(cached) => {
+                self.scan = Some(cached);
+                self.rescan = Some(Scan::start(home.clone()));
+                self.stale_dirty = true;
+                self.junk_dirty = true;
+                self.go(home);
+            }
+            None => self.start_scan(home),
+        }
+    }
+
     pub fn start_scan(&mut self, root: PathBuf) {
+        self.rescan = None;
         self.scan = Some(Scan::start(root.clone()));
         self.big.clear();
         self.stale.clear();
@@ -755,6 +928,10 @@ impl Gui {
             return;
         }
         self.stale = disk::stale_items(scan, self.stale_days * 86_400);
+        if scan.cached_at.is_some() {
+            // Cached results may name things removed since.
+            self.stale.retain(|i| std::fs::symlink_metadata(&i.path).is_ok());
+        }
         let alive: HashSet<PathBuf> = self.stale.iter().map(|i| i.path.clone()).collect();
         self.stale_checked.retain(|p| alive.contains(p));
         self.stale_dirty = false;
@@ -769,6 +946,9 @@ impl Gui {
             return;
         }
         self.junk = macpilot::devjunk::find(scan);
+        if scan.cached_at.is_some() {
+            self.junk.retain(|j| std::fs::symlink_metadata(&j.path).is_ok());
+        }
         let cutoff = disk::now_unix() - self.settings.junk_days * 86_400;
         self.junk_checked = self.junk.iter().filter(|j| j.project_modified < cutoff).map(|j| j.path.clone()).collect();
         self.junk_dirty = false;
@@ -782,6 +962,7 @@ impl Gui {
     fn handle_shot(&mut self, ctx: &egui::Context) {
         let Some((started, requested, path)) = self.shot.as_ref().map(|s| (s.started, s.requested, s.path.clone())) else { return };
         let busy = self.scan.as_ref().is_some_and(|s| !s.done())
+            || self.rescan.is_some()
             || self.dupes.as_ref().is_some_and(|d| !d.done())
             || self.apps.is_none()
             || self.orphans.is_none()
@@ -800,7 +981,8 @@ impl Gui {
             );
         }
         // Permission dialogs can stall the scan; do not wait forever.
-        let busy = busy && started.elapsed() < Duration::from_secs(30);
+        // MACPILOT_SHOT_EARLY=1 captures without waiting (to see loading states).
+        let busy = busy && started.elapsed() < Duration::from_secs(30) && std::env::var("MACPILOT_SHOT_EARLY").is_err();
         if started.elapsed() > Duration::from_secs(4) && !busy && !requested {
             if std::env::var("MACPILOT_SELECT").is_ok() {
                 overview::dev_select(self);
@@ -861,6 +1043,14 @@ impl eframe::App for Gui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_shot(&ctx);
+
+        self.handle_drop(&ctx);
+
+        // With the menu bar item on, closing the window keeps MacPilot running there (⌘Q quits).
+        if self.settings.menu_bar && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            mac::hide_window();
+        }
 
         // ⌘1…⌘7 switch pages, ⌘F searches processes, ⌘, opens settings.
         let pages = [Page::Overview, Page::Procs, Page::Disk, Page::Clean, Page::Apps, Page::Startup, Page::Settings];
@@ -931,6 +1121,7 @@ impl Gui {
         for (p, icon, label) in items {
             let badge = match p {
                 Page::Startup => self.startup.as_ref().map(|s| s.iter().filter(|i| i.unwanted && !i.disabled).count()).filter(|n| *n > 0),
+                Page::Settings => self.update.as_ref().map(|_| 1),
                 _ => None,
             };
             if widgets::nav_item(ui, self.page == p, icon, label, badge).clicked() {
@@ -1050,9 +1241,21 @@ impl Gui {
 }
 
 fn main() -> eframe::Result {
-    // `MacPilot --autostart on|off` toggles launch at login without opening a window.
+    // `MacPilot --autostart on|off|status` toggles or shows launch at login without opening a window.
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--autostart") {
+        if args.get(i + 1).map(String::as_str) == Some("status") {
+            let how = if mac::login_item_supported() { "login item" } else { "LaunchAgent" };
+            let state = if autostart::needs_approval() {
+                "needs approval in System Settings"
+            } else if autostart::enabled() {
+                "on"
+            } else {
+                "off"
+            };
+            println!("Launch at login ({how}): {state}");
+            return Ok(());
+        }
         let on = args.get(i + 1).map(String::as_str) != Some("off");
         match autostart::set(on) {
             Ok(()) => println!("Launch at login {}", if on { "enabled" } else { "disabled" }),

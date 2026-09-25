@@ -25,11 +25,24 @@ pub struct Settings {
     pub dupes_min_mb: u64,
     /// Scan the home folder automatically when the app starts.
     pub scan_on_start: bool,
+    /// Show CPU and memory in the menu bar; closing the window keeps MacPilot running there.
+    pub menu_bar: bool,
+    /// Look for a newer release on GitHub once a day.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { lang: None, theme: Theme::System, stale_days: 180, junk_days: 30, dupes_min_mb: 1, scan_on_start: true }
+        Settings {
+            lang: None,
+            theme: Theme::System,
+            stale_days: 180,
+            junk_days: 30,
+            dupes_min_mb: 1,
+            scan_on_start: true,
+            menu_bar: true,
+            check_updates: true,
+        }
     }
 }
 
@@ -61,6 +74,8 @@ impl Settings {
                 "junk_days" => s.junk_days = v.parse().unwrap_or(s.junk_days),
                 "dupes_min_mb" => s.dupes_min_mb = v.parse().unwrap_or(s.dupes_min_mb),
                 "scan_on_start" => s.scan_on_start = v != "false",
+                "menu_bar" => s.menu_bar = v != "false",
+                "check_updates" => s.check_updates = v != "false",
                 _ => {}
             }
         }
@@ -75,12 +90,14 @@ impl Settings {
             Theme::Dark => "dark",
         };
         let text = format!(
-            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\n",
+            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\n",
             self.lang.map(|l| l.code()).unwrap_or("system"),
             self.stale_days,
             self.junk_days,
             self.dupes_min_mb,
-            self.scan_on_start
+            self.scan_on_start,
+            self.menu_bar,
+            self.check_updates
         );
         std::fs::write(file(), text)
     }

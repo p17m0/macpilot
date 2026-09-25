@@ -85,6 +85,8 @@ pub struct Scan {
     pub shared: Arc<ScanShared>,
     pub started: std::time::Instant,
     pub finished_in: Option<std::time::Duration>,
+    /// Set when the results were loaded from the cache of an earlier scan (unix time of that scan).
+    pub cached_at: Option<i64>,
 }
 
 fn make_pool(name: &'static str, background: bool) -> rayon::ThreadPool {
@@ -123,7 +125,52 @@ impl Scan {
             make_pool("scan", false).install(|| walk(&s, &r, mt));
             s.done.store(true, Ordering::SeqCst);
         });
-        Scan { root, shared, started: std::time::Instant::now(), finished_in: None }
+        Scan { root, shared, started: std::time::Instant::now(), finished_in: None, cached_at: None }
+    }
+
+    /// Results of the last finished scan of `root`, if they were saved (see [`Scan::save_cache`]).
+    pub fn load_cache(root: &Path) -> Option<Scan> {
+        let data = fs::read(cache_path()).ok()?;
+        let (cached_root, at, dirs, big) = cache::decode(&data)?;
+        if cached_root != root {
+            return None;
+        }
+        let shared = ScanShared::new();
+        shared.files.store(dirs.get(root).map(|d| d.files).unwrap_or(0), Ordering::Relaxed);
+        shared.bytes.store(dirs.get(root).map(|d| d.size).unwrap_or(0), Ordering::Relaxed);
+        *shared.dirs.lock().unwrap() = dirs;
+        *shared.big.lock().unwrap() = big;
+        shared.done.store(true, Ordering::Relaxed);
+        Some(Scan {
+            root: root.to_path_buf(),
+            shared: Arc::new(shared),
+            started: std::time::Instant::now(),
+            finished_in: Some(std::time::Duration::ZERO),
+            cached_at: Some(at),
+        })
+    }
+
+    /// Save a finished scan in the background, so the next launch shows results at once.
+    pub fn save_cache(&self) {
+        if !self.done() || self.cached_at.is_some() || self.shared.cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        let (shared, root) = (self.shared.clone(), self.root.clone());
+        std::thread::spawn(move || {
+            let data = {
+                let dirs = shared.dirs.lock().unwrap();
+                let big = shared.big.lock().unwrap();
+                cache::encode(&root, now_unix(), &dirs, &big)
+            };
+            let path = cache_path();
+            let tmp = path.with_extension("tmp");
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            if fs::write(&tmp, data).is_ok() {
+                let _ = fs::rename(&tmp, &path);
+            }
+        });
     }
 
     pub fn done(&self) -> bool {
@@ -181,6 +228,136 @@ impl Scan {
 impl Drop for Scan {
     fn drop(&mut self) {
         self.shared.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+fn cache_path() -> PathBuf {
+    home().join("Library/Caches/MacPilot/scan-v1.bin")
+}
+
+/// Compact binary format of the scan cache: sorted paths with shared prefixes, numbers as varints.
+/// About 30 bytes per folder; a home folder with 260 000 folders takes ~8 MB and loads in ~0.1 s.
+mod cache {
+    use super::{DirStat, FileRec};
+    use std::collections::HashMap;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+
+    const MAGIC: &[u8] = b"MACPILOT-SCAN-1\n";
+
+    fn put(out: &mut Vec<u8>, mut v: u64) {
+        while v >= 0x80 {
+            out.push(v as u8 | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    }
+
+    struct Reader<'a> {
+        b: &'a [u8],
+        i: usize,
+    }
+
+    impl Reader<'_> {
+        fn num(&mut self) -> Option<u64> {
+            let mut v = 0u64;
+            for shift in (0..64).step_by(7) {
+                let byte = *self.b.get(self.i)?;
+                self.i += 1;
+                v |= u64::from(byte & 0x7f) << shift;
+                if byte < 0x80 {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        fn bytes(&mut self, n: usize) -> Option<&[u8]> {
+            let s = self.b.get(self.i..self.i.checked_add(n)?)?;
+            self.i += n;
+            Some(s)
+        }
+    }
+
+    /// Paths are written as (bytes shared with the previous path, rest).
+    fn put_paths<'a>(out: &mut Vec<u8>, paths: impl Iterator<Item = &'a Path>, mut extra: impl FnMut(&mut Vec<u8>, &Path)) {
+        let mut prev: &[u8] = &[];
+        for p in paths {
+            let b = p.as_os_str().as_bytes();
+            let common = prev.iter().zip(b).take_while(|(x, y)| x == y).count();
+            put(out, common as u64);
+            put(out, (b.len() - common) as u64);
+            out.extend_from_slice(&b[common..]);
+            extra(out, p);
+            prev = b;
+        }
+    }
+
+    fn get_path(r: &mut Reader, prev: &mut Vec<u8>) -> Option<PathBuf> {
+        let common = r.num()? as usize;
+        let len = r.num()? as usize;
+        if common > prev.len() {
+            return None;
+        }
+        prev.truncate(common);
+        prev.extend_from_slice(r.bytes(len)?);
+        Some(PathBuf::from(OsStr::from_bytes(prev)))
+    }
+
+    pub fn encode(root: &Path, at: i64, dirs: &HashMap<PathBuf, DirStat>, big: &[FileRec]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(dirs.len() * 32 + 64);
+        out.extend_from_slice(MAGIC);
+        let rb = root.as_os_str().as_bytes();
+        put(&mut out, rb.len() as u64);
+        out.extend_from_slice(rb);
+        put(&mut out, at.max(0) as u64);
+        let mut keys: Vec<&PathBuf> = dirs.keys().collect();
+        keys.sort_unstable_by(|a, b| a.as_os_str().as_bytes().cmp(b.as_os_str().as_bytes()));
+        put(&mut out, keys.len() as u64);
+        put_paths(&mut out, keys.iter().map(|p| p.as_path()), |out, p| {
+            let d = &dirs[p];
+            for v in [d.size, d.files, d.modified.max(0) as u64, d.used.max(0) as u64, d.media] {
+                put(out, v);
+            }
+        });
+        let mut files: Vec<&FileRec> = big.iter().collect();
+        files.sort_unstable_by(|a, b| a.path.as_os_str().as_bytes().cmp(b.path.as_os_str().as_bytes()));
+        put(&mut out, files.len() as u64);
+        let mut i = 0;
+        put_paths(&mut out, files.iter().map(|f| f.path.as_path()), |out, _| {
+            let f = files[i];
+            i += 1;
+            for v in [f.size, f.modified.max(0) as u64, f.used.max(0) as u64, u64::from(f.media)] {
+                put(out, v);
+            }
+        });
+        out
+    }
+
+    type Decoded = (PathBuf, i64, HashMap<PathBuf, DirStat>, Vec<FileRec>);
+
+    pub fn decode(b: &[u8]) -> Option<Decoded> {
+        let mut r = Reader { b: b.strip_prefix(MAGIC)?, i: 0 };
+        let rl = r.num()? as usize;
+        let root = PathBuf::from(OsStr::from_bytes(r.bytes(rl)?));
+        let at = r.num()? as i64;
+        let n = r.num()? as usize;
+        let mut dirs = HashMap::with_capacity(n.min(4_000_000));
+        let mut prev = Vec::new();
+        for _ in 0..n {
+            let p = get_path(&mut r, &mut prev)?;
+            let (size, files, modified, used, media) = (r.num()?, r.num()?, r.num()? as i64, r.num()? as i64, r.num()?);
+            dirs.insert(p, DirStat { size, files, modified, used, media });
+        }
+        let n = r.num()? as usize;
+        let mut big = Vec::with_capacity(n.min(100_000));
+        prev.clear();
+        for _ in 0..n {
+            let path = get_path(&mut r, &mut prev)?;
+            let (size, modified, used, media) = (r.num()?, r.num()? as i64, r.num()? as i64, r.num()? != 0);
+            big.push(FileRec { size, path, modified, used, media });
+        }
+        Some((root, at, dirs, big))
     }
 }
 
@@ -598,7 +775,11 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
     let home = home();
     let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
 
-    if p.components().any(|c| c.as_os_str() == ".git") {
+    // Only plain absolute paths: "a/../b" could step out of a safe folder into a protected one.
+    if !p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir)) {
+        return (Blocked, tr("Unusual path. Open the folder itself to remove things from it.").into());
+    }
+    if p.components().any(|c| c.as_os_str().eq_ignore_ascii_case(".git")) {
         return (Blocked, tr("Git history of a project. Removing it loses all commits.").into());
     }
     // The inside of an .app bundle — removing parts breaks the app.
@@ -629,7 +810,10 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
     let Ok(rel) = p.strip_prefix(&home) else {
         return (Blocked, tr("System area outside your home folder. Removing things here can break macOS or installed apps.").into());
     };
-    let rel_s = rel.to_string_lossy();
+    // APFS is usually case-insensitive: ~/library/keychains is the same folder as ~/Library/Keychains.
+    let rel_s = rel.to_string_lossy().to_lowercase();
+    let rel = Path::new(&rel_s);
+    let under = |t: &str| rel.starts_with(t.to_lowercase());
     if rel_s.is_empty() {
         return (Blocked, tr("This is your home folder.").into());
     }
@@ -660,7 +844,7 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
         ".cargo",
         ".rustup",
     ];
-    if PROTECTED_EXACT.contains(&rel_s.as_ref()) {
+    if PROTECTED_EXACT.iter().any(|t| t.eq_ignore_ascii_case(&rel_s)) {
         return (Blocked, tr("A standard macOS folder. The folder itself stays; you can remove what is inside.").into());
     }
     const PROTECTED_TREE: &[&str] = &[
@@ -682,14 +866,14 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
         ".rustup/toolchains",
     ];
     for t in PROTECTED_TREE {
-        if rel.starts_with(t) {
+        if under(t) {
             return (Blocked, trf("Important data (~/{0}): keys, passwords, mail, messages or settings. Removal is blocked.", &[t]));
         }
     }
-    if name.ends_with(".photoslibrary") {
+    if name.to_lowercase().ends_with(".photoslibrary") {
         return (Blocked, tr("Photos library. Removing it removes all photos — use the Photos app.").into());
     }
-    if rel.starts_with("Library/Mobile Documents") || rel.starts_with("Library/CloudStorage") {
+    if under("Library/Mobile Documents") || under("Library/CloudStorage") {
         return (Careful, tr("Cloud folder (iCloud, Dropbox…): removal syncs and deletes it on ALL your devices.").into());
     }
 
@@ -715,7 +899,7 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
         (".pnpm-store", tr("pnpm store — downloaded again when needed.")),
     ];
     for (t, why) in safe_tree {
-        if rel.starts_with(t) {
+        if under(t) {
             return (Safe, why.into());
         }
     }
@@ -727,19 +911,19 @@ pub fn deletion_safety(p: &Path) -> (DelSafety, String) {
         ".DS_Store" => return (Safe, tr("Finder service file.").into()),
         _ => {}
     }
-    if rel.starts_with("Library/Developer/Xcode/Archives") {
+    if under("Library/Developer/Xcode/Archives") {
         return (Careful, tr("Xcode archives — needed to symbolicate crash reports of released builds.").into());
     }
-    if rel.starts_with("Library/Developer/CoreSimulator/Devices") {
+    if under("Library/Developer/CoreSimulator/Devices") {
         return (Careful, tr("iOS simulator data. Better: `xcrun simctl delete unavailable`.").into());
     }
-    if rel.starts_with("Library/Containers") || rel.starts_with("Library/Group Containers") || rel.starts_with("Library/Application Support") {
+    if under("Library/Containers") || under("Library/Group Containers") || under("Library/Application Support") {
         return (Careful, tr("App data (settings, databases, cache). If the app is still used it may lose data.").into());
     }
-    if rel.starts_with("Library") {
+    if under("Library") {
         return (Careful, tr("Service data in ~/Library. Remove only if you know what it is.").into());
     }
-    if rel.starts_with("Downloads") {
+    if under("Downloads") {
         return (Careful, tr("Downloads — usually fine to remove once you no longer need the file.").into());
     }
     (Careful, tr("Your data. It goes to the Trash, so you can restore it.").into())
@@ -771,6 +955,130 @@ mod tests {
         assert_eq!(deletion_safety(&h("Documents/report.pdf")).0, DelSafety::Careful);
         assert_eq!(deletion_safety(&h("Library/Mobile Documents/x.txt")).0, DelSafety::Careful);
         assert_eq!(deletion_safety(Path::new("/Applications/Foo.app")).0, DelSafety::Careful);
+    }
+
+    /// Every protected place, including tricky spellings of it.
+    #[test]
+    fn protected_places_table() {
+        let outside = [
+            "/Library/LaunchDaemons/com.foo.plist",
+            "/opt/homebrew/bin/brew",
+            "/private/var/db",
+            "/Volumes/Backup",
+            "/Applications/Safari.app",
+            "/Applications/Xcode.app/Contents/Developer",
+            "relative/path",
+        ];
+        for p in outside {
+            assert_eq!(deletion_safety(Path::new(p)).0, DelSafety::Blocked, "{p}");
+        }
+        let inside = [
+            "Desktop",
+            "Downloads",
+            "Movies",
+            "Public",
+            "Applications/Foo.app/Contents/Resources",
+            "Library/Application Support",
+            "Library/Containers",
+            "Library/Developer",
+            "Library/LaunchAgents",
+            "Library/Preferences/com.apple.finder.plist",
+            "Library/Messages/chat.db",
+            "Library/Mail/V10",
+            "Library/Cookies/Cookies.binarycookies",
+            "Library/Accounts/Accounts4.sqlite",
+            "Library/Calendars/Calendar.sqlitedb",
+            "Library/Safari/History.db",
+            "Library/Photos/Libraries",
+            ".gnupg/pubring.kbx",
+            ".cargo",
+            ".rustup/toolchains/stable-aarch64-apple-darwin",
+            "Pictures/Photos Library.photoslibrary",
+            "Dev/app/.git/objects/ab",
+            "Dev/app/node_modules/pkg/.git",
+            // Case and ".." tricks must not slip past the rules.
+            "library/keychains/login.keychain-db",
+            "LIBRARY/Messages",
+            ".SSH/id_rsa",
+            "Dev/app/.GIT",
+            "Library/Caches/../Keychains/login.keychain-db",
+            "Library/Caches/./x/../../Mail",
+        ];
+        for r in inside {
+            assert_eq!(deletion_safety(&h(r)).0, DelSafety::Blocked, "~/{r}");
+        }
+    }
+
+    #[test]
+    fn safe_places_table() {
+        for r in [
+            "Library/Logs/DiagnosticReports/foo.ips",
+            "Library/Developer/Xcode/DerivedData/App-abc",
+            "Library/Developer/Xcode/iOS DeviceSupport/17.0",
+            "Library/Developer/CoreSimulator/Caches/dyld",
+            "library/caches/com.foo",
+            ".npm/_cacache/index-v5",
+            ".cache/pip",
+            ".gradle/caches/8.5",
+            ".cargo/registry/src",
+            ".Trash/old.zip",
+            "Dev/py/__pycache__",
+            "Documents/.DS_Store",
+        ] {
+            assert_eq!(deletion_safety(&h(r)).0, DelSafety::Safe, "~/{r}");
+        }
+    }
+
+    #[test]
+    fn careful_places_table() {
+        for p in ["/Volumes/USB/movie.mkv", "/Applications/Foo.app", "/Applications/Utilities/Foo.app"] {
+            assert_eq!(deletion_safety(Path::new(p)).0, DelSafety::Careful, "{p}");
+        }
+        for r in [
+            "Library/Application Support/Foo",
+            "Library/Containers/com.foo.app",
+            "Library/CloudStorage/Dropbox/report.docx",
+            "Library/Mobile Documents/com~apple~CloudDocs/a.txt",
+            "Library/Developer/Xcode/Archives/2024-01-01",
+            "Library/Developer/CoreSimulator/Devices/ABCD",
+            "Library/Something",
+            "Downloads/installer.dmg",
+            "Documents/thesis.pages",
+            // Build folders count as junk only inside your projects, never inside tools.
+            ".vscode/extensions/foo/node_modules",
+        ] {
+            assert_eq!(deletion_safety(&h(r)).0, DelSafety::Careful, "~/{r}");
+        }
+    }
+
+    #[test]
+    fn scan_cache_round_trip() {
+        let root = h("");
+        let mut dirs = HashMap::new();
+        dirs.insert(root.clone(), DirStat { size: 1 << 40, files: 3, modified: 1_700_000_000, used: 1_700_000_500, media: 7 });
+        dirs.insert(h("Dev"), DirStat { size: 10, files: 1, modified: 5, used: 6, media: 0 });
+        dirs.insert(h("Dev/проект"), DirStat { size: 4, files: 1, modified: 0, used: -3, media: 0 });
+        let big = vec![FileRec { size: 99, path: h("Dev/big.bin"), modified: 1, used: 2, media: true }];
+        let data = cache::encode(&root, 42, &dirs, &big);
+        let (r, at, d, b) = cache::decode(&data).expect("decodes");
+        assert_eq!((r, at, d.len(), b.len()), (root, 42, 3, 1));
+        assert_eq!(d[&h("Dev/проект")].size, 4);
+        assert_eq!(d[&h("Dev/проект")].used, 0, "negative times are clamped");
+        assert_eq!(d[&h("")].size, 1 << 40);
+        assert!(b[0].media && b[0].path == h("Dev/big.bin"));
+        // Truncated or foreign files are rejected instead of giving wrong numbers.
+        assert!(cache::decode(&data[..data.len() - 3]).is_none());
+        assert!(cache::decode(b"not a cache").is_none());
+    }
+
+    /// Load time of the real cache: `cargo test --release --lib real_cache -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_cache() {
+        let t = std::time::Instant::now();
+        let s = Scan::load_cache(&home()).expect("run MacPilot once to create the cache");
+        let n = s.shared.dirs.lock().unwrap().len();
+        println!("{n} folders loaded in {:?}", t.elapsed());
     }
 
     #[test]

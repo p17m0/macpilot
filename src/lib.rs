@@ -13,6 +13,7 @@ pub mod procs;
 pub mod settings;
 pub mod startup;
 pub mod trash;
+pub mod update;
 
 pub use i18n::{tr, trf};
 
