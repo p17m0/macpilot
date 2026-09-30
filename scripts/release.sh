@@ -17,6 +17,8 @@ cd "$(dirname "$0")/.."
 
 VERSION=${1:-v$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)}
 DIST=dist
+# Without a Developer ID a release is ad-hoc signed (the local certificate is only for your own Mac).
+[[ -z ${CODESIGN_IDENTITY:-} ]] && export MACPILOT_ADHOC=1
 scripts/bundle.sh --universal
 
 NOTARY=()

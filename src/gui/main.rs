@@ -453,6 +453,16 @@ impl Gui {
         if self.last_disks.elapsed() >= Duration::from_secs(5) {
             self.disks.refresh(true);
             self.last_disks = Instant::now();
+            // Full Disk Access was just granted: scan again to include what was skipped.
+            let fda = macpilot::full_disk_access_cached();
+            if fda && !self.full_disk_access {
+                self.full_disk_access = true;
+                self.remeasure_targets();
+                if self.scan.as_ref().is_some_and(|s| s.root == macpilot::home()) {
+                    self.rescan = Some(Scan::start(macpilot::home()));
+                }
+            }
+            self.full_disk_access = fda;
         }
         while let Ok(m) = self.rx.try_recv() {
             self.on_msg(m);
@@ -666,6 +676,12 @@ impl Gui {
             let _ = tx.send(Msg::Measured(i, disk::measure(&p)));
             ctx.request_repaint();
         });
+    }
+
+    pub fn remeasure_targets(&mut self) {
+        for i in 0..self.targets.len() {
+            self.remeasure(i);
+        }
     }
 
     pub fn remeasure_by_id(&mut self, id: &str) {
@@ -967,9 +983,9 @@ impl Gui {
             || self.apps.is_none()
             || self.orphans.is_none()
             || self.startup.is_none()
-            || self.targets.iter().any(|t| t.stat.is_none() && t.path.exists());
+            || self.targets.iter().any(|t| t.stat.is_none() && disk::present(&t.path));
         if std::env::var("MACPILOT_DEBUG").is_ok() && busy {
-            let waiting: Vec<&str> = self.targets.iter().filter(|t| t.stat.is_none() && t.path.exists()).map(|t| t.id).collect();
+            let waiting: Vec<&str> = self.targets.iter().filter(|t| t.stat.is_none() && disk::present(&t.path)).map(|t| t.id).collect();
             eprintln!(
                 "busy: scan={} files={} dupes={} apps={} orphans={} startup={} targets={waiting:?}",
                 self.scan.as_ref().is_some_and(|s| !s.done()),
@@ -1263,7 +1279,12 @@ fn main() -> eframe::Result {
         }
         return Ok(());
     }
-    let vp = egui::ViewportBuilder::default().with_title("MacPilot").with_inner_size([1320.0, 840.0]).with_min_inner_size([1060.0, 640.0]);
+    // An empty icon keeps the one from the app bundle; otherwise eframe shows its own logo in the Dock.
+    let vp = egui::ViewportBuilder::default()
+        .with_icon(Arc::new(egui::IconData::default()))
+        .with_title("MacPilot")
+        .with_inner_size([1320.0, 840.0])
+        .with_min_inner_size([1060.0, 640.0]);
     let opts = eframe::NativeOptions { viewport: vp, ..Default::default() };
     eframe::run_native("MacPilot", opts, Box::new(|cc| Ok(Box::new(Gui::new(cc)))))
 }

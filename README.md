@@ -122,9 +122,13 @@ This installs `MacPilot.app` to `/Applications` and the `macpilot` command to `~
 
 ## First run
 
-- **Give Full Disk Access** in System Settings → Privacy & Security → Full Disk Access → add MacPilot. Without it, macOS hides some folders and may pause the scan with permission dialogs. MacPilot shows a hint when that happens.
+Permissions are asked **once** and then remembered, including after updates:
+
+- **Give Full Disk Access** in System Settings → Privacy & Security → Full Disk Access → add MacPilot. This single permission covers everything, so there are no other file dialogs. Without it MacPilot skips other apps' data (macOS would otherwise ask about it on every launch) and shows those folders as “no access”.
 - When you first move something to the Trash, allow MacPilot to control **Finder**, so that “Put Back” works.
-- **Open at login** is in Settings. It uses a standard LaunchAgent in `~/Library/LaunchAgents/local.macpilot.plist`.
+- **Open at login** is in Settings. MacPilot appears in System Settings → General → Login Items like any other app.
+
+macOS remembers permissions by the app's signature. Release builds are signed. `./install.sh` signs with a local certificate that it creates once in its own keychain (`~/Library/Keychains/macpilot-signing.keychain-db`), so permissions also survive rebuilds.
 
 ## Terminal usage
 

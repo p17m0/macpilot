@@ -431,6 +431,21 @@ pub fn is_media(p: &Path) -> bool {
 
 /// Folders of other apps' data (sandbox containers). Since macOS 14 opening some of them waits
 /// for a privacy decision that may never come, which would hang the calling thread forever.
+/// Whether looking at `p` is fine without a macOS dialog: anything inside another app's container
+/// needs Full Disk Access (otherwise macOS asks "…would like to access data from other apps").
+pub fn reachable(p: &Path) -> bool {
+    let home = home();
+    let inside = ["Library/Containers", "Library/Group Containers"]
+        .iter()
+        .any(|base| p.strip_prefix(home.join(base)).is_ok_and(|rest| rest.components().count() >= 2));
+    !inside || crate::full_disk_access_cached()
+}
+
+/// `p` exists and can be looked at without a permission dialog.
+pub fn present(p: &Path) -> bool {
+    reachable(p) && fs::symlink_metadata(p).is_ok()
+}
+
 fn needs_guard(p: &Path) -> bool {
     let home = home();
     ["Library/Containers", "Library/Group Containers"]
@@ -446,6 +461,11 @@ pub fn read_entries(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsStrin
     }
     if !needs_guard(p) {
         return read(p);
+    }
+    // Without Full Disk Access, macOS asks "…would like to access data from other apps" for every
+    // app container, again on every launch. Skip them; the scan reports them as "no access".
+    if !crate::full_disk_access_cached() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "needs Full Disk Access"));
     }
     let (tx, rx) = std::sync::mpsc::channel();
     let q = p.to_path_buf();
@@ -513,6 +533,9 @@ fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
 /// Measure one path synchronously. Inside a thread pool it runs on that pool;
 /// otherwise on the shared low-priority "measure" pool.
 pub fn measure(path: &Path) -> DirStat {
+    if !reachable(path) {
+        return DirStat::default();
+    }
     let s = ScanShared::new();
     match fs::symlink_metadata(path) {
         Ok(md) if md.is_dir() && rayon::current_thread_index().is_some() => walk(&s, path, md.mtime()),

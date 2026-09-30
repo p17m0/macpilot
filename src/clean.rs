@@ -143,7 +143,7 @@ pub fn measure_all(targets: &[Target], tx: Sender<(usize, DirStat)>) {
     std::thread::spawn(move || {
         crate::background_qos();
         for (i, p) in paths {
-            let st = if p.exists() { disk::measure(&p) } else { DirStat::default() };
+            let st = if disk::present(&p) { disk::measure(&p) } else { DirStat::default() };
             if tx.send((i, st)).is_err() {
                 break;
             }

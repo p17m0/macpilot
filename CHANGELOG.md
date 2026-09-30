@@ -12,6 +12,8 @@
 - **Safety**: `deletion_safety` now also blocks paths with `..` and case variants of protected folders (`~/library/keychains`), and has many more tests.
 - Disk header: the used space moved under the bar, so long translations no longer overlap the buttons.
 - README screenshots in light and dark.
+- **Permissions are asked once**: `./install.sh` signs with a stable local certificate (`scripts/local-signing.sh`), so macOS keeps Full Disk Access and the Finder permission across rebuilds. Without Full Disk Access, other apps' containers are skipped instead of triggering a dialog on every launch, and a fresh scan starts as soon as access is granted.
+- The Dock icon is MacPilot's own again (eframe no longer replaces it with its logo).
 
 ## 0.2.0
 

@@ -30,6 +30,20 @@ pub fn has_full_disk_access() -> bool {
     std::fs::File::open(home().join("Library/Application Support/com.apple.TCC/TCC.db")).is_ok()
 }
 
+/// [`has_full_disk_access`], re-checked at most every 10 seconds (it is asked for every guarded folder).
+pub fn full_disk_access_cached() -> bool {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> = std::sync::Mutex::new(None);
+    let mut c = CACHE.lock().unwrap();
+    match *c {
+        Some((t, v)) if t.elapsed() < std::time::Duration::from_secs(10) => v,
+        _ => {
+            let v = has_full_disk_access();
+            *c = Some((std::time::Instant::now(), v));
+            v
+        }
+    }
+}
+
 /// Open System Settings → Privacy & Security → Full Disk Access.
 pub fn open_full_disk_access_settings() {
     let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").spawn();

@@ -72,15 +72,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Signing. Without CODESIGN_IDENTITY: an ad-hoc signature (required on Apple Silicon, fine for your own Mac).
-# With CODESIGN_IDENTITY="Developer ID Application: Name (TEAMID)": hardened runtime + secure timestamp,
-# ready for notarization (scripts/release.sh).
-ID="${CODESIGN_IDENTITY:--}"
-if [[ $ID == "-" ]]; then
-  for f in "$APP/Contents/Helpers/macpilot" "$APP" "$DIST/macpilot"; do
-    codesign --force --sign - "$f" >/dev/null 2>&1 || true
-  done
-else
+# Signing, in order of preference:
+#   CODESIGN_IDENTITY="Developer ID Application: Name (TEAMID)" — hardened runtime + secure timestamp,
+#     ready for notarization (scripts/release.sh);
+#   on your own Mac: a local certificate (scripts/local-signing.sh), so macOS keeps MacPilot's
+#     permissions across rebuilds;
+#   in CI, or with MACPILOT_ADHOC=1: an ad-hoc signature.
+ID="${CODESIGN_IDENTITY:-}"
+if [[ -n $ID && $ID != "-" ]]; then
   # Inside out: nested code first, then the bundle.
   for f in "$APP/Contents/Helpers/macpilot" "$DIST/macpilot"; do
     codesign --force --options runtime --timestamp --sign "$ID" "$f"
@@ -88,6 +87,24 @@ else
   codesign --force --options runtime --timestamp --entitlements scripts/entitlements.plist --sign "$ID" "$APP"
   codesign --verify --strict --verbose=1 "$APP"
   echo "Signed with: $ID"
+elif [[ -z ${CI:-} && -z ${MACPILOT_ADHOC:-} && $ID != "-" ]] && LOCAL=$(scripts/local-signing.sh 2>/dev/null); then
+  NAME=${LOCAL%%$'\t'*}
+  KC=${LOCAL#*$'\t'}
+  # codesign only finds identities in the search list: add the signing keychain for a moment.
+  ORIG=(${(f)"$(security list-keychains -d user | tr -d '"' | sed 's/^ *//')"})
+  security list-keychains -d user -s "${ORIG[@]}" "$KC"
+  trap 'security list-keychains -d user -s "${ORIG[@]}"' EXIT
+  for f in "$APP/Contents/Helpers/macpilot" "$DIST/macpilot"; do
+    codesign --force --timestamp=none --sign "$NAME" "$f"
+  done
+  codesign --force --timestamp=none --entitlements scripts/entitlements.plist --sign "$NAME" "$APP"
+  security list-keychains -d user -s "${ORIG[@]}"
+  trap - EXIT
+  echo "Signed with the local certificate (permissions survive rebuilds)"
+else
+  for f in "$APP/Contents/Helpers/macpilot" "$APP" "$DIST/macpilot"; do
+    codesign --force --sign - "$f" >/dev/null 2>&1 || true
+  done
 fi
 
 echo "Built $APP and $DIST/macpilot (MacPilot $VERSION, profile $PROFILE)"

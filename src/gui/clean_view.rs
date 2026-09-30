@@ -28,7 +28,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 
 fn system(g: &mut Gui, ui: &mut Ui) {
     let safe_total: u64 = g.targets.iter().filter(|t| t.cleanable()).filter_map(|t| t.stat.map(|s| s.size)).sum();
-    let measuring = g.targets.iter().any(|t| t.stat.is_none() && t.path.exists());
+    let measuring = g.targets.iter().any(|t| t.stat.is_none() && disk::present(&t.path));
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new(tr("Can be freed safely")).color(C::dim(ui)));
@@ -42,9 +42,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button(tr("⟳ Measure again")).clicked() {
-                for i in 0..g.targets.len() {
-                    g.remeasure(i);
-                }
+                g.remeasure_targets();
             }
         });
     });
@@ -58,7 +56,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
             .filter(|i| {
                 let t = &g.targets[*i];
                 // Empty places are hidden too; the Trash card always stays.
-                t.kind == Kind::Trash || (t.path.exists() && t.stat.is_none_or(|s| s.size > 0))
+                t.kind == Kind::Trash || (disk::present(&t.path) && t.stat.is_none_or(|s| s.size > 0))
             })
             .collect();
         let n = shown.len();
@@ -100,7 +98,7 @@ enum CardAction {
 
 fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
     let t = &g.targets[i];
-    let exists = t.path.exists();
+    let exists = disk::present(&t.path);
     let mut out = None;
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
