@@ -3,7 +3,7 @@
 #   brew install --cask OWNER/tap/macpilot
 # On every release update `version` and `sha256` (the zip's line in SHA256SUMS.txt).
 cask "macpilot" do
-  version "0.3.0"
+  version "0.4.0"
   sha256 "REPLACE_WITH_SHA256_OF_THE_ZIP"
 
   url "https://github.com/OWNER/macpilot/releases/download/v#{version}/MacPilot-v#{version}-macos-universal.zip"

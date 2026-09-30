@@ -65,6 +65,8 @@ pub struct ProcInfo {
     pub run_time: u64,
     pub disk_read: u64,
     pub disk_write: u64,
+    /// Energy use, watts (CPU and GPU work of the process). `None` for other users' processes.
+    pub power: Option<f32>,
     pub safety: Safety,
     /// The outermost .app bundle the process belongs to.
     pub app: Option<PathBuf>,
@@ -91,6 +93,8 @@ pub struct AppGroup {
     pub pids: Vec<u32>,
     pub cpu: f32,
     pub mem: u64,
+    /// Watts, summed over the processes macOS reports it for (`None`: none of them).
+    pub power: Option<f32>,
     pub safety: Safety,
 }
 
@@ -114,6 +118,8 @@ pub struct Snapshot {
 pub struct Monitor {
     sys: System,
     users: Users,
+    /// Energy counters from the previous refresh: pid → (nanojoules, when).
+    energy: HashMap<u32, (u64, std::time::Instant)>,
     pub snap: Snapshot,
 }
 
@@ -135,6 +141,7 @@ impl Monitor {
         let mut m = Monitor {
             sys: System::new(),
             users: Users::new_with_refreshed_list(),
+            energy: HashMap::new(),
             snap: Snapshot { my_uid: unsafe { libc::getuid() }, my_pid: std::process::id(), ..Default::default() },
         };
         m.refresh();
@@ -157,6 +164,8 @@ impl Monitor {
                 .with_user(UpdateKind::OnlyIfNotSet),
         );
         let (my_uid, my_pid) = (self.snap.my_uid, self.snap.my_pid);
+        let now = std::time::Instant::now();
+        let mut energy = HashMap::with_capacity(self.energy.len());
         let mut procs = Vec::with_capacity(self.sys.processes().len());
         for (pid, p) in self.sys.processes() {
             if p.thread_kind().is_some() {
@@ -174,6 +183,12 @@ impl Monitor {
             let cmd = p.cmd().iter().map(|s| s.to_string_lossy()).collect::<Vec<_>>().join(" ");
             let status = p.status();
             let du = p.disk_usage();
+            let power = energy_nj(pid).and_then(|nj| {
+                energy.insert(pid, (nj, now));
+                let (prev, t) = self.energy.get(&pid)?;
+                let dt = now.duration_since(*t).as_secs_f32();
+                (dt > 0.2).then(|| nj.saturating_sub(*prev) as f32 / 1e9 / dt)
+            });
             procs.push(ProcInfo {
                 pid,
                 ppid: p.parent().map(|p| p.as_u32()),
@@ -194,8 +209,10 @@ impl Monitor {
                 run_time: p.run_time(),
                 disk_read: du.read_bytes,
                 disk_write: du.written_bytes,
+                power,
             });
         }
+        self.energy = energy;
         let s = &mut self.snap;
         s.by_pid = procs.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
         s.procs = procs;
@@ -207,6 +224,28 @@ impl Monitor {
         s.swap_total = self.sys.total_swap();
         s.pressure = memory_pressure();
     }
+}
+
+/// Energy the process has used so far, nanojoules (`rusage_info_v6`, macOS 13+).
+fn energy_nj(pid: u32) -> Option<u64> {
+    // Only the fields up to `ri_energy_nj` matter; the size must match the kernel's struct.
+    #[repr(C)]
+    struct RusageV6 {
+        uuid: [u8; 16],
+        v4: [u64; 35],
+        flags: u64,
+        user_ptime: u64,
+        system_ptime: u64,
+        pinstructions: u64,
+        pcycles: u64,
+        energy_nj: u64,
+        rest: [u64; 15],
+    }
+    const _: () = assert!(std::mem::size_of::<RusageV6>() == 464);
+    const RUSAGE_INFO_V6: libc::c_int = 6;
+    let mut ri: RusageV6 = unsafe { std::mem::zeroed() };
+    let r = unsafe { libc::proc_pid_rusage(pid as libc::c_int, RUSAGE_INFO_V6, &mut ri as *mut RusageV6 as *mut libc::rusage_info_t) };
+    (r == 0 && ri.energy_nj > 0).then_some(ri.energy_nj)
 }
 
 fn memory_pressure() -> u32 {
@@ -264,11 +303,15 @@ impl Snapshot {
                 pids: Vec::new(),
                 cpu: 0.0,
                 mem: 0,
+                power: None,
                 safety: Safety::User,
             });
             g.pids.push(p.pid);
             g.cpu += p.cpu;
             g.mem += p.mem;
+            if let Some(w) = p.power {
+                g.power = Some(g.power.unwrap_or(0.0) + w);
+            }
             g.safety = g.safety.max(p.safety);
         }
         map.into_values().collect()

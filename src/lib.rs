@@ -2,6 +2,7 @@
 //! Shared by the window app (`macpilot-gui`) and the terminal app (`macpilot`).
 
 pub mod apps;
+pub mod battery;
 pub mod clean;
 pub mod devjunk;
 pub mod disk;

@@ -10,12 +10,12 @@ use std::time::Duration;
 use macpilot::i18n::{self, Lang};
 use macpilot::settings::Settings;
 // `app` and `ui` refer to the core as `crate::…`.
-use macpilot::{apps, clean, devjunk, disk, dupes, fmt, procs, startup, tr, trf};
+use macpilot::{apps, battery, clean, devjunk, disk, dupes, fmt, procs, startup, tr, trf};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
 fn help() -> String {
     format!(
-        "MacPilot {}\n\n{}\n  macpilot                 {}\n  macpilot disk [PATH]     {}\n  macpilot clean           {}\n  macpilot stale [DAYS]    {}\n  macpilot junk [DAYS]     {}\n  macpilot apps            {}\n  macpilot leftovers       {}\n  macpilot startup         {}\n  macpilot dupes [PATH]    {}\n\n{}\n  --lang en|fr|es|de|ru    {}\n",
+        "MacPilot {}\n\n{}\n  macpilot                 {}\n  macpilot disk [PATH]     {}\n  macpilot clean           {}\n  macpilot stale [DAYS]    {}\n  macpilot junk [DAYS]     {}\n  macpilot apps            {}\n  macpilot leftovers       {}\n  macpilot startup         {}\n  macpilot battery         {}\n  macpilot dupes [PATH]    {}\n\n{}\n  --lang en|fr|es|de|ru    {}\n",
         env!("CARGO_PKG_VERSION"),
         tr("Usage:"),
         tr("interactive terminal UI"),
@@ -26,6 +26,7 @@ fn help() -> String {
         tr("list installed apps by size and last use"),
         tr("list leftovers of removed apps"),
         tr("list startup items"),
+        tr("battery charge, health and what uses energy"),
         tr("find duplicate files"),
         tr("Options:"),
         tr("interface language"),
@@ -52,6 +53,7 @@ fn main() {
         "apps" => report_apps(),
         "leftovers" => report_leftovers(),
         "startup" => report_startup(),
+        "battery" => report_battery(),
         "dupes" => report_dupes(args.get(1).map(PathBuf::from).unwrap_or_else(macpilot::home), settings.dupes_min_mb),
         _ => {
             if !std::io::stdout().is_terminal() {
@@ -189,6 +191,55 @@ fn report_startup() {
             .collect::<Vec<_>>()
             .join(" ");
         println!("{:<8} {:<50} {:<18} {} {flags}", state, it.label, it.vendor, it.program);
+    }
+}
+
+fn report_battery() {
+    let Some(mut b) = battery::read() else {
+        println!("{}", tr("This Mac has no battery."));
+        return;
+    };
+    battery::read_health(&mut b);
+    let state = if b.charging {
+        tr("charging")
+    } else if b.plugged {
+        tr("on power adapter")
+    } else {
+        tr("on battery")
+    };
+    println!("{}: {}% · {state}", tr("Charge"), b.percent);
+    if let Some(m) = b.time_to_empty.or(b.time_to_full) {
+        println!("  {}", fmt::duration(m as u64 * 60));
+    }
+    println!("{}: {}", tr("Power"), fmt::watts(b.watts));
+    let health = b.health_pct().map(|h| format!("{h}%")).unwrap_or("—".into());
+    println!(
+        "{}: {health} · {} · {}",
+        tr("Health"),
+        b.condition.as_deref().unwrap_or("—"),
+        trf("{0} of {1} cycles", &[&b.cycles, &battery::RATED_CYCLES])
+    );
+    println!("{}: {}", tr("Temperature"), fmt::celsius(b.temperature));
+    // Energy is a rate: two samples a second apart.
+    let mut mon = procs::Monitor::new();
+    std::thread::sleep(Duration::from_millis(1500));
+    mon.refresh();
+    let mut groups: Vec<_> = mon.groups().into_iter().filter(|g| g.power.is_some_and(|p| p >= 0.05)).collect();
+    groups.sort_by(|a, b| b.power.unwrap_or(0.0).total_cmp(&a.power.unwrap_or(0.0)));
+    println!("\n{}:", tr("Using energy now"));
+    if groups.is_empty() {
+        println!("  {}", tr("Your apps are idle."));
+    }
+    for g in groups.iter().take(10) {
+        println!("{:>10}  {}", fmt::watts(g.power.unwrap_or(0.0)), g.label);
+    }
+    let blockers = battery::sleep_blockers();
+    if !blockers.is_empty() {
+        println!("\n{}:", tr("Keeping the Mac awake"));
+        for bl in blockers {
+            let name = mon.get(bl.pid).map(|p| p.app_name().unwrap_or_else(|| p.name.clone())).unwrap_or(bl.name.clone());
+            println!("{:>10}  {name}", fmt::duration(bl.seconds));
+        }
     }
 }
 

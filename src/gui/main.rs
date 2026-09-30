@@ -2,6 +2,7 @@
 
 mod apps_view;
 mod autostart;
+mod battery_view;
 mod clean_view;
 mod disk_view;
 mod mac;
@@ -34,11 +35,26 @@ use widgets::{C, Level};
 pub enum Page {
     Overview,
     Procs,
+    Battery,
     Disk,
     Clean,
     Apps,
     Startup,
     Settings,
+}
+
+/// Battery state, refreshed in the background.
+#[derive(Clone, Default)]
+pub struct PowerInfo {
+    /// `None` until the first reading, then `Some(None)` on Macs without a battery.
+    pub battery: Option<Option<macpilot::battery::Battery>>,
+    pub blockers: Vec<macpilot::battery::SleepBlocker>,
+}
+
+impl PowerInfo {
+    pub fn battery(&self) -> Option<&macpilot::battery::Battery> {
+        self.battery.as_ref().and_then(|b| b.as_ref())
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,6 +71,7 @@ pub enum SortKey {
     Count,
     Cpu,
     Mem,
+    Power,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -149,10 +166,19 @@ pub struct Gui {
     pub sel: Option<Sel>,
     pub focus_search: bool,
 
+    // Battery
+    pub power: Arc<Mutex<PowerInfo>>,
+    pub battery_hist: Vec<macpilot::battery::Sample>,
+    /// Chart range: 1 or 7 days.
+    pub battery_days: i64,
+    last_battery_sample: Option<(i64, bool)>,
+
     // Disk
     pub scan: Option<Scan>,
     /// Fresh scan running in the background while `scan` shows cached results.
     pub rescan: Option<Scan>,
+    /// On battery with a fresh cache the refresh waits for the power adapter.
+    rescan_when_plugged: bool,
     pub cwd: PathBuf,
     pub entries: Vec<Entry>,
     pub entries_err: Option<String>,
@@ -259,6 +285,43 @@ impl Gui {
             });
         }
 
+        // Battery: every 5 seconds; health (a slower call) every 5 minutes.
+        let power = Arc::new(Mutex::new(PowerInfo::default()));
+        {
+            let power = power.clone();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                macpilot::background_qos();
+                let mut health: Option<(Option<u32>, Option<String>)> = None;
+                for i in 0u64.. {
+                    let mut b = macpilot::battery::read();
+                    if let Some(b) = &mut b {
+                        if i % 60 == 0 || health.is_none() {
+                            macpilot::battery::read_health(b);
+                            health = Some((b.health, b.condition.clone()));
+                        } else if let Some((h, c)) = &health {
+                            b.health = *h;
+                            b.condition = c.clone();
+                        }
+                    }
+                    let blockers = if i % 2 == 0 || i < 2 { Some(macpilot::battery::sleep_blockers()) } else { None };
+                    let has = b.is_some();
+                    {
+                        let mut p = power.lock().unwrap();
+                        p.battery = Some(b);
+                        if let Some(bl) = blockers {
+                            p.blockers = bl;
+                        }
+                    }
+                    ctx.request_repaint();
+                    if !has && i > 0 {
+                        break; // no battery: nothing will change
+                    }
+                    std::thread::sleep(Duration::from_secs(5));
+                }
+            });
+        }
+
         let (tx, rx) = channel();
         let targets = clean::targets();
         {
@@ -315,8 +378,13 @@ impl Gui {
             only_mine: false,
             sel: None,
             focus_search: false,
+            power,
+            battery_hist: macpilot::battery::load_history(),
+            battery_days: 1,
+            last_battery_sample: None,
             scan: None,
             rescan: None,
+            rescan_when_plugged: false,
             cwd: home.clone(),
             entries: Vec::new(),
             entries_err: None,
@@ -384,6 +452,7 @@ impl Gui {
         let (page, sub) = page.split_once(':').unwrap_or((page.as_str(), ""));
         let p = match page {
             "procs" => Page::Procs,
+            "battery" => Page::Battery,
             "disk" => Page::Disk,
             "clean" => Page::Clean,
             "apps" => Page::Apps,
@@ -525,6 +594,11 @@ impl Gui {
             if t.elapsed() > Duration::from_secs(10) {
                 self.toast = None;
             }
+        }
+        self.log_battery();
+        if self.rescan_when_plugged && self.power.lock().unwrap().battery().is_some_and(|b| b.plugged) {
+            self.rescan_when_plugged = false;
+            self.rescan = Some(Scan::start(macpilot::home()));
         }
         self.update_menu_bar();
         // Once a day (the app may run for weeks in the menu bar); the first check a little after launch.
@@ -844,6 +918,25 @@ impl Gui {
         });
     }
 
+    /// Remember the charge every 5 minutes (and when the charger is connected or removed) for the history chart.
+    fn log_battery(&mut self) {
+        let Some(b) = self.power.lock().unwrap().battery().cloned() else { return };
+        let now = disk::now_unix();
+        let due = match self.last_battery_sample {
+            None => true,
+            Some((t, plugged)) => now - t >= 300 || plugged != b.plugged,
+        };
+        if !due {
+            return;
+        }
+        let s = macpilot::battery::Sample { ts: now, percent: b.percent, plugged: b.plugged, watts: b.watts };
+        macpilot::battery::append_history(s, &self.battery_hist);
+        self.battery_hist.push(s);
+        let cutoff = now - 15 * 86_400;
+        self.battery_hist.retain(|x| x.ts >= cutoff);
+        self.last_battery_sample = Some((now, b.plugged));
+    }
+
     /// CPU and memory in the menu bar, refreshed every two seconds.
     fn update_menu_bar(&mut self) {
         if !self.settings.menu_bar {
@@ -863,6 +956,9 @@ impl Gui {
         if let Some((avail, total)) = widgets::data_volume(&self.disks) {
             lines.push(trf("Disk: {0} free of {1}", &[&fmt::bytes(avail), &fmt::bytes(total)]));
         }
+        if let Some(b) = self.power.lock().unwrap().battery() {
+            lines.push(battery_view::menu_line(b));
+        }
         if let Some(p) = s.procs.iter().filter(|p| p.cpu >= 20.0).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
             lines.push(trf("Busiest: {0} — {1} CPU", &[&p.app_name().unwrap_or_else(|| p.name.clone()), &fmt::pct(p.cpu)]));
         } else {
@@ -877,8 +973,15 @@ impl Gui {
         let home = macpilot::home();
         match Scan::load_cache(&home) {
             Some(cached) => {
+                // A full scan costs several watts for a while: on battery a cache from today is good enough.
+                let age = cached.cached_at.map(|t| disk::now_unix() - t).unwrap_or(i64::MAX);
+                let on_battery = macpilot::battery::read().is_some_and(|b| !b.plugged);
                 self.scan = Some(cached);
-                self.rescan = Some(Scan::start(home.clone()));
+                if on_battery && age < 86_400 {
+                    self.rescan_when_plugged = true;
+                } else {
+                    self.rescan = Some(Scan::start(home.clone()));
+                }
                 self.stale_dirty = true;
                 self.junk_dirty = true;
                 self.go(home);
@@ -889,6 +992,7 @@ impl Gui {
 
     pub fn start_scan(&mut self, root: PathBuf) {
         self.rescan = None;
+        self.rescan_when_plugged = false;
         self.scan = Some(Scan::start(root.clone()));
         self.big.clear();
         self.stale.clear();
@@ -1068,9 +1172,10 @@ impl eframe::App for Gui {
             mac::hide_window();
         }
 
-        // ⌘1…⌘7 switch pages, ⌘F searches processes, ⌘, opens settings.
-        let pages = [Page::Overview, Page::Procs, Page::Disk, Page::Clean, Page::Apps, Page::Startup, Page::Settings];
-        let keys = [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7];
+        // ⌘1…⌘8 switch pages (in sidebar order), ⌘F searches processes, ⌘, opens settings.
+        let pages: Vec<Page> = self.nav_items().into_iter().map(|(p, _, _)| p).collect();
+        let keys =
+            [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8];
         let mut go = None;
         let mut search = false;
         ctx.input(|i| {
@@ -1107,6 +1212,7 @@ impl eframe::App for Gui {
         match self.page {
             Page::Overview => overview::show(self, ui),
             Page::Procs => procs_view::show(self, ui),
+            Page::Battery => battery_view::show(self, ui),
             Page::Disk => disk_view::show(self, ui),
             Page::Clean => clean_view::show(self, ui),
             Page::Apps => apps_view::show(self, ui),
@@ -1119,22 +1225,30 @@ impl eframe::App for Gui {
 }
 
 impl Gui {
+    /// Sidebar pages; Battery only on Macs that have one.
+    fn nav_items(&self) -> Vec<(Page, widgets::Icon, &'static str)> {
+        let has_battery = self.power.lock().unwrap().battery().is_some();
+        let mut v = vec![(Page::Overview, widgets::Icon::Overview, tr("Overview")), (Page::Procs, widgets::Icon::Procs, tr("Processes"))];
+        if has_battery {
+            v.push((Page::Battery, widgets::Icon::Battery, tr("Battery")));
+        }
+        v.extend([
+            (Page::Disk, widgets::Icon::Disk, tr("Disk")),
+            (Page::Clean, widgets::Icon::Clean, tr("Cleanup")),
+            (Page::Apps, widgets::Icon::Apps, tr("Apps")),
+            (Page::Startup, widgets::Icon::Startup, tr("Startup")),
+            (Page::Settings, widgets::Icon::Settings, tr("Settings")),
+        ]);
+        v
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             widgets::app_logo(ui, 26.0);
             ui.label(RichText::new("MacPilot").size(18.0).strong());
         });
         ui.add_space(16.0);
-        let items = [
-            (Page::Overview, widgets::Icon::Overview, tr("Overview")),
-            (Page::Procs, widgets::Icon::Procs, tr("Processes")),
-            (Page::Disk, widgets::Icon::Disk, tr("Disk")),
-            (Page::Clean, widgets::Icon::Clean, tr("Cleanup")),
-            (Page::Apps, widgets::Icon::Apps, tr("Apps")),
-            (Page::Startup, widgets::Icon::Startup, tr("Startup")),
-            (Page::Settings, widgets::Icon::Settings, tr("Settings")),
-        ];
-        for (p, icon, label) in items {
+        for (p, icon, label) in self.nav_items() {
             let badge = match p {
                 Page::Startup => self.startup.as_ref().map(|s| s.iter().filter(|i| i.unwanted && !i.disabled).count()).filter(|n| *n > 0),
                 Page::Settings => self.update.as_ref().map(|_| 1),
@@ -1146,6 +1260,11 @@ impl Gui {
         }
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             let s = self.snap.clone();
+            if let Some(b) = self.power.lock().unwrap().battery() {
+                let (value, _) = battery_view::short_state(b);
+                // The meter turns red when the charge is low.
+                widgets::side_meter(ui, tr("Battery"), &value, 1.0 - b.percent as f32 / 100.0, None);
+            }
             if let Some((avail, total)) = widgets::data_volume(&self.disks) {
                 let r = total.saturating_sub(avail) as f32 / total.max(1) as f32;
                 widgets::side_meter(ui, tr("Disk"), &trf("{0} free", &[&fmt::bytes(avail)]), r, None);
@@ -1172,6 +1291,7 @@ impl Gui {
                         let hint = match self.page {
                             Page::Overview => tr("MacPilot checks your Mac in the background. Nothing is removed without your confirmation."),
                             Page::Procs => tr("Select a process to see what it is. Right-click for actions. ⌘F to search."),
+                            Page::Battery => tr("Energy is measured for your own apps. The display and macOS use the rest."),
                             Page::Disk => tr("Double-click to open a folder. Removal always goes to the Trash."),
                             Page::Clean => tr("Cleanup moves items to the Trash — everything can be restored."),
                             Page::Apps => tr("Uninstall removes the app and the files it left in your Library."),

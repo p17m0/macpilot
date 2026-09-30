@@ -152,11 +152,11 @@ fn nav(g: &mut Gui, ui: &mut Ui) {
                 ui,
                 &mut g.disk_mode,
                 &[
-                    (DiskMode::List, tr("List")),
-                    (DiskMode::Map, tr("Map")),
-                    (DiskMode::Big, tr("Large files")),
-                    (DiskMode::Stale, tr("Not used")),
                     (DiskMode::Dupes, tr("Duplicates")),
+                    (DiskMode::Stale, tr("Not used")),
+                    (DiskMode::Big, tr("Large files")),
+                    (DiskMode::Map, tr("Map")),
+                    (DiskMode::List, tr("List")),
                 ],
             );
             if before != g.disk_mode && g.disk_mode == DiskMode::Dupes && g.dupes.is_none() {

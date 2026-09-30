@@ -14,6 +14,59 @@ struct Rec {
     go: Box<dyn FnOnce(&mut Gui)>,
 }
 
+fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec>) {
+    let info = g.power.lock().unwrap().clone();
+    let Some(b) = info.battery() else { return };
+    let to_battery = || -> Box<dyn FnOnce(&mut Gui)> { Box::new(|g: &mut Gui| g.go_page(Page::Battery)) };
+    if b.needs_service() {
+        out.push(Rec {
+            color: C::RED,
+            title: tr("The battery needs service").into(),
+            text: trf("Maximum capacity: {0} of new.", &[&b.health_pct().map(|h| format!("{h}%")).unwrap_or_default()]),
+            button: tr("Battery"),
+            go: to_battery(),
+        });
+    }
+    if b.temperature >= 40.0 {
+        out.push(Rec {
+            color: C::YELLOW,
+            title: trf("The battery is hot: {0}", &[&fmt::celsius(b.temperature)]),
+            text: tr("Heat wears batteries fastest. Heavy apps, charging on a soft surface or in the sun make it worse.").into(),
+            button: tr("Battery"),
+            go: to_battery(),
+        });
+    }
+    if b.plugged {
+        return;
+    }
+    // On battery: apps that drain it.
+    if let Some(gr) =
+        groups.iter().filter(|gr| gr.power.is_some_and(|p| p >= 4.0)).max_by(|a, b| a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)))
+    {
+        let key = gr.key.clone();
+        out.push(Rec {
+            color: C::YELLOW,
+            title: trf("“{0}” uses a lot of energy", &[&gr.label]),
+            text: trf("{0} right now. Quit it when you do not need it, and the charge lasts longer.", &[&fmt::watts(gr.power.unwrap_or(0.0))]),
+            button: tr("Show"),
+            go: Box::new(move |g| {
+                g.view = ProcView::Apps;
+                g.sel = Some(Sel::Group(key));
+                g.go_page(Page::Procs);
+            }),
+        });
+    }
+    if let Some(bl) = info.blockers.iter().find(|bl| bl.seconds >= 30 * 60) {
+        out.push(Rec {
+            color: C::YELLOW,
+            title: trf("“{0}” keeps the Mac awake", &[&crate::battery_view::blocker_name(g, bl)]),
+            text: trf("For {0} already. On battery this drains it even while you are away.", &[&fmt::duration(bl.seconds)]),
+            button: tr("Battery"),
+            go: to_battery(),
+        });
+    }
+}
+
 fn recommendations(g: &Gui) -> Vec<Rec> {
     let mut out = Vec::new();
     let s = &g.snap;
@@ -78,6 +131,8 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
             }),
         });
     }
+
+    battery_recs(g, &groups, &mut out);
 
     if let Some(hot) = s.procs.iter().filter(|p| p.cpu >= 90.0 && !p.safety.blocked()).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
         let pid = hot.pid;
@@ -217,7 +272,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     out
 }
 
-fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f32, hist: Option<&std::collections::VecDeque<f32>>) {
+pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f32, hist: Option<&std::collections::VecDeque<f32>>) {
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.label(RichText::new(title).color(C::dim(ui)));

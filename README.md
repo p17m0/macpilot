@@ -46,6 +46,8 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Processes.** Group processes by app (all Chrome helpers in one row), as a flat list, or as a tree. Each process comes with an explanation of what it is (about 100 macOS services are described), whether it is safe to stop, and its open network ports. Apps quit gracefully like ⌘Q, other processes get SIGTERM. You can also force quit or pause a process. Vital macOS processes cannot be stopped at all, and system processes require you to type “yes”.
 
+**Battery.** Charge, time left and the power being drawn right now; health and cycles as System Settings reports them; temperature; a 24-hour and 7-day charge history with the average drain per hour. It lists the apps using energy now (in watts) and what keeps the Mac awake, and warns when the battery needs service or runs hot. The Processes page has an *Energy* column too.
+
 **Disk.**
 - **List**: sizes, share of the folder, *Modified* and *Opened* dates.
 - **Map**: a treemap, like DaisyDisk.
@@ -140,6 +142,7 @@ macpilot junk [DAYS]     list build folders of projects untouched for DAYS days
 macpilot apps            list installed apps by size and last use
 macpilot leftovers       list leftovers of removed apps
 macpilot startup         list startup items
+macpilot battery         battery charge, health and what uses energy
 macpilot dupes [PATH]    find duplicate files
 macpilot --lang fr       any command in another language (en, fr, es, de, ru)
 ```

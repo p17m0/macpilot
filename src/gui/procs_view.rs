@@ -35,6 +35,7 @@ fn cmp_procs(key: SortKey, desc: bool) -> impl Fn(&ProcInfo, &ProcInfo) -> std::
         let o = match key {
             SortKey::Cpu => a.cpu.total_cmp(&b.cpu).then(a.mem.cmp(&b.mem)),
             SortKey::Mem | SortKey::Count => a.mem.cmp(&b.mem),
+            SortKey::Power => a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)),
             SortKey::Pid => a.pid.cmp(&b.pid),
             SortKey::Name => b.name.to_lowercase().cmp(&a.name.to_lowercase()),
         };
@@ -71,6 +72,7 @@ fn build_rows(g: &Gui) -> Vec<Row> {
                 let o = match key {
                     SortKey::Cpu => a.cpu.total_cmp(&b.cpu),
                     SortKey::Mem => a.mem.cmp(&b.mem),
+                    SortKey::Power => a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)),
                     SortKey::Count | SortKey::Pid => a.pids.len().cmp(&b.pids.len()),
                     SortKey::Name => b.label.to_lowercase().cmp(&a.label.to_lowercase()),
                 };
@@ -133,7 +135,7 @@ fn sort_header(g: &mut Gui, ui: &mut Ui, label: &str, key: SortKey) {
             g.sort_desc = !g.sort_desc;
         } else {
             g.sort = key;
-            g.sort_desc = matches!(key, SortKey::Cpu | SortKey::Mem | SortKey::Count);
+            g.sort_desc = matches!(key, SortKey::Cpu | SortKey::Mem | SortKey::Count | SortKey::Power);
         }
     }
     r.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -167,9 +169,10 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
     let apps = g.view == ProcView::Apps;
     let mut tb = TableBuilder::new(ui).striped(true).sense(Sense::click()).cell_layout(egui::Layout::left_to_right(egui::Align::Center));
     tb = if apps {
-        tb.column(Column::remainder().at_least(220.0).clip(true))
+        tb.column(Column::remainder().at_least(200.0).clip(true))
             .column(Column::exact(90.0))
             .column(Column::exact(70.0))
+            .column(Column::exact(80.0))
             .column(Column::exact(170.0))
             .column(Column::exact(96.0))
     } else {
@@ -177,6 +180,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
             .column(Column::exact(64.0))
             .column(Column::exact(90.0).clip(true))
             .column(Column::exact(64.0))
+            .column(Column::exact(80.0))
             .column(Column::exact(150.0))
             .column(Column::exact(82.0))
             .column(Column::exact(96.0))
@@ -186,6 +190,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
             h.col(|ui| sort_header(g, ui, tr("App"), SortKey::Name));
             h.col(|ui| sort_header(g, ui, tr("Processes"), SortKey::Count));
             h.col(|ui| sort_header(g, ui, "CPU", SortKey::Cpu));
+            h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
             h.col(|ui| sort_header(g, ui, tr("Memory"), SortKey::Mem));
             h.col(|ui| plain_header(ui, tr("Safety")));
         } else {
@@ -193,6 +198,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
             h.col(|ui| sort_header(g, ui, "PID", SortKey::Pid));
             h.col(|ui| plain_header(ui, tr("User")));
             h.col(|ui| sort_header(g, ui, "CPU", SortKey::Cpu));
+            h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
             h.col(|ui| sort_header(g, ui, tr("Memory"), SortKey::Mem));
             h.col(|ui| plain_header(ui, tr("Status")));
             h.col(|ui| plain_header(ui, tr("Safety")));
@@ -216,6 +222,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 row.col(|ui| {
                     ui.label(RichText::new(fmt::pct(gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
                 });
+                row.col(|ui| power_cell(ui, gr.power));
                 row.col(|ui| mem_cell(ui, gr.mem, max_mem));
                 row.col(|ui| {
                     w::safety_badge(ui, gr.safety);
@@ -249,6 +256,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 row.col(|ui| {
                     ui.label(RichText::new(fmt::pct(p.cpu)).color(w::cpu_color(ui, p.cpu)));
                 });
+                row.col(|ui| power_cell(ui, p.power));
                 row.col(|ui| mem_cell(ui, p.mem, max_mem));
                 row.col(|ui| {
                     if p.stopped {
@@ -278,6 +286,28 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
             CtxAction::Kill => ask_stop(g, true),
             CtxAction::Finder => reveal(g),
             CtxAction::Disk => show_on_disk(g),
+        }
+    }
+}
+
+/// Watts; unknown for other users' processes (macOS only reports them to their owner).
+fn power_cell(ui: &mut Ui, w: Option<f32>) {
+    match w {
+        Some(v) if v >= 0.005 => {
+            let color = if v >= 4.0 {
+                C::RED
+            } else if v >= 1.0 {
+                C::YELLOW
+            } else {
+                C::text(ui)
+            };
+            ui.label(RichText::new(fmt::watts(v)).color(color));
+        }
+        Some(_) => {
+            ui.label(RichText::new("0").color(C::dim(ui)));
+        }
+        None => {
+            ui.label(RichText::new("—").color(C::dim(ui))).on_hover_text(tr("macOS reports energy only for your own processes."));
         }
     }
 }

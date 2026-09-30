@@ -143,6 +143,7 @@ pub fn note(ui: &mut Ui, color: Color32, title: &str, text: &str) {
 pub enum Icon {
     Overview,
     Procs,
+    Battery,
     Disk,
     Clean,
     Apps,
@@ -167,6 +168,14 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
                 let x = r.left() + (2.5 + i as f32 * 3.6) * u;
                 p.line_segment([Pos2::new(x, r.bottom() - 2.0 * u), Pos2::new(x, r.bottom() - (2.0 + h) * u)], Stroke::new(2.2 * u, c));
             }
+        }
+        Icon::Battery => {
+            let body = Rect::from_center_size(m - Vec2::new(0.8 * u, 0.0), Vec2::new(12.0 * u, 7.0 * u));
+            p.rect_stroke(body, 1.8 * u, s, egui::StrokeKind::Middle);
+            let nub = Rect::from_center_size(Pos2::new(body.right() + 1.3 * u, m.y), Vec2::new(1.4 * u, 3.0 * u));
+            p.rect_filled(nub, 0.6 * u, c);
+            let fill = Rect::from_min_max(body.min + Vec2::splat(1.9 * u), Pos2::new(body.left() + 7.0 * u, body.bottom() - 1.9 * u));
+            p.rect_filled(fill, 0.8 * u, c);
         }
         Icon::Disk => {
             p.circle_stroke(m, 6.5 * u, s);
@@ -278,8 +287,12 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
     let mut changed = false;
     egui::Frame::new().fill(C::track(ui)).corner_radius(8).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
+        // Inside a right-aligned row egui lays items out from the right: add them reversed,
+        // so the options always read in the given order.
+        let rtl = ui.layout().prefer_right_to_left();
         ui.horizontal(|ui| {
-            for (v, label) in options {
+            let ordered: Vec<&(T, &str)> = if rtl { options.iter().rev().collect() } else { options.iter().collect() };
+            for (v, label) in ordered {
                 let sel = *value == *v;
                 let text = RichText::new(*label).color(if sel { C::text(ui) } else { C::dim(ui) });
                 let b = egui::Button::new(text).fill(if sel { C::card(ui) } else { Color32::TRANSPARENT }).corner_radius(6).stroke(Stroke::NONE);

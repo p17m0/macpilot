@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- **Battery page**: charge and time left, power drawn right now, health and condition exactly as System Settings reports them, charge cycles and temperature. A 24-hour / 7-day charge chart (MacPilot logs the charge every 5 minutes), average drain per hour, apps using energy now, and what keeps the Mac awake. Advice when the battery needs service, is hot, is near its rated cycles, or is low without Low Power Mode.
+- **Energy column** in Processes: watts per process and per app (processor and graphics), from macOS's own energy counters.
+- Overview warns about apps draining the battery, apps keeping the Mac awake on battery power, and battery health.
+- The battery in the sidebar and the menu bar menu; `macpilot battery` in the terminal.
+- On battery MacPilot uses today's scan cache instead of rescanning at launch, and refreshes it once the charger is connected.
+- Segmented controls keep their order inside right-aligned rows (and for VoiceOver).
+
 ## 0.3.0
 
 - **Signed and notarized releases**: `scripts/release.sh` and the release workflow sign with a Developer ID and notarize when the secrets are set (see `docs/RELEASING.md`). Releases now include a DMG, and there is a Homebrew cask. The `macpilot` command ships inside the app.

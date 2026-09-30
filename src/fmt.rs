@@ -83,6 +83,18 @@ pub fn pct(v: f32) -> String {
     }
 }
 
+/// Power: "2.4 W", "0.05 W", "2,4 Вт".
+pub fn watts(v: f32) -> String {
+    let d = if v.abs() < 0.1 { 2 } else { 1 };
+    let unit = if lang() == Lang::Ru { "Вт" } else { "W" };
+    format!("{}\u{00A0}{unit}", fmt_float(v as f64, d))
+}
+
+/// Temperature: "30.4 °C".
+pub fn celsius(v: f32) -> String {
+    format!("{}\u{00A0}°C", fmt_float(v as f64, 1))
+}
+
 /// Things we count, with their plural forms in every language.
 #[derive(Clone, Copy)]
 pub enum Noun {

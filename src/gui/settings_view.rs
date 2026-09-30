@@ -54,7 +54,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 
             let mut theme = g.settings.theme;
             row(ui, tr("Appearance"), "", |ui| {
-                w::segmented(ui, &mut theme, &[(Theme::Dark, tr("Dark")), (Theme::Light, tr("Light")), (Theme::System, tr("System"))]);
+                w::segmented(ui, &mut theme, &[(Theme::System, tr("System")), (Theme::Light, tr("Light")), (Theme::Dark, tr("Dark"))]);
             });
             if theme != g.settings.theme {
                 g.settings.theme = theme;
@@ -105,7 +105,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 
             let mut stale = g.settings.stale_days;
             row(ui, tr("“Not used” threshold"), tr("Items not opened or changed for longer than this are listed."), |ui| {
-                w::segmented(ui, &mut stale, &[(730, tr("2 years")), (365, tr("1 year")), (180, tr("6 months")), (90, tr("3 months"))]);
+                w::segmented(ui, &mut stale, &[(90, tr("3 months")), (180, tr("6 months")), (365, tr("1 year")), (730, tr("2 years"))]);
             });
             if stale != g.settings.stale_days {
                 g.settings.stale_days = stale;
@@ -116,7 +116,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 
             let mut junk = g.settings.junk_days;
             row(ui, tr("Inactive project after"), tr("Build folders of projects not changed for this long are pre-selected for removal."), |ui| {
-                w::segmented(ui, &mut junk, &[(365, tr("1 year")), (90, tr("3 months")), (30, tr("1 month")), (7, tr("1 week"))]);
+                w::segmented(ui, &mut junk, &[(7, tr("1 week")), (30, tr("1 month")), (90, tr("3 months")), (365, tr("1 year"))]);
             });
             if junk != g.settings.junk_days {
                 g.settings.junk_days = junk;
@@ -126,7 +126,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 
             let mut mb = g.settings.dupes_min_mb;
             row(ui, tr("Duplicates: ignore files smaller than"), "", |ui| {
-                w::segmented(ui, &mut mb, &[(100, "100 MB"), (10, "10 MB"), (1, "1 MB")]);
+                w::segmented(ui, &mut mb, &[(1, "1 MB"), (10, "10 MB"), (100, "100 MB")]);
             });
             if mb != g.settings.dupes_min_mb {
                 g.settings.dupes_min_mb = mb;
