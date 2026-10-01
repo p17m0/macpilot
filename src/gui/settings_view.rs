@@ -5,24 +5,42 @@ use macpilot::i18n::Lang;
 use macpilot::settings::{Theme, UiStyle};
 use macpilot::{tr, trf};
 
-use crate::widgets::{self as w, C, Level};
+use crate::widgets::{self as w, C, Level, Txt};
 use crate::{Gui, autostart};
 
-fn row(ui: &mut Ui, title: &str, hint: &str, add: impl FnOnce(&mut Ui)) {
-    w::card(ui, |ui| {
+thread_local! {
+    /// The next row is the first of its group (no divider above it).
+    static FIRST_ROW: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Related settings in one rounded box with thin dividers, as in System Settings.
+fn group(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    w::card_frame(ui).inner_margin(egui::Margin::symmetric(16, 4)).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.set_max_width(ui.available_width() - 330.0);
-                ui.label(RichText::new(title).strong());
-                if !hint.is_empty() {
-                    ui.label(RichText::new(hint).size(12.0).color(C::dim(ui)));
-                }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
-        });
+        FIRST_ROW.set(true);
+        add(ui);
     });
-    ui.add_space(6.0);
+    ui.add_space(w::sp::L);
+}
+
+fn row(ui: &mut Ui, title: &str, hint: &str, add: impl FnOnce(&mut Ui)) {
+    if !FIRST_ROW.replace(false) {
+        let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.painter().hline(r.x_range(), r.center().y, egui::Stroke::new(1.0, C::track(ui)));
+    }
+    ui.add_space(w::sp::S);
+    ui.horizontal(|ui| {
+        ui.set_min_height(32.0);
+        ui.vertical(|ui| {
+            ui.set_max_width(ui.available_width() - 330.0);
+            ui.label(RichText::new(title).semibold());
+            if !hint.is_empty() {
+                ui.label(RichText::new(hint).callout().color(C::dim(ui)));
+            }
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
+    });
+    ui.add_space(w::sp::S);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -38,19 +56,29 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         w::centered(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 ui.set_max_width(820.0);
-                w::header(ui, tr("Settings"), "");
-                w::segmented(
+                w::title_bar(
                     ui,
-                    &mut g.settings_tab,
-                    &[(SettingsTab::General, tr("General")), (SettingsTab::Privacy, tr("Privacy")), (SettingsTab::Disk, tr("Disk and Cleanup"))],
+                    tr("Settings"),
+                    "",
+                    |ui| {
+                        w::segmented(
+                            ui,
+                            &mut g.settings_tab,
+                            &[
+                                (SettingsTab::General, tr("General")),
+                                (SettingsTab::Privacy, tr("Privacy")),
+                                (SettingsTab::Disk, tr("Disk and Cleanup")),
+                            ],
+                        );
+                    },
+                    |_| {},
                 );
-                ui.add_space(10.0);
                 match g.settings_tab {
                     SettingsTab::General => general(g, ui),
                     SettingsTab::Privacy => privacy(g, ui),
                     SettingsTab::Disk => disk(g, ui),
                 }
-                ui.add_space(10.0);
+                ui.add_space(w::sp::M);
                 ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
             });
         });
@@ -58,6 +86,13 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 }
 
 fn general(g: &mut Gui, ui: &mut Ui) {
+    group(ui, |ui| look(g, ui));
+    group(ui, |ui| behaviour(g, ui));
+    updates(g, ui);
+}
+
+/// Language, style and appearance.
+fn look(g: &mut Gui, ui: &mut Ui) {
     let mut lang_changed = false;
     row(ui, tr("Language"), tr("Language of the interface. “System” follows macOS."), |ui| {
         let current = g.settings.lang;
@@ -98,7 +133,10 @@ fn general(g: &mut Gui, ui: &mut Ui) {
         crate::apply_theme(ui.ctx(), theme);
         g.save_settings();
     }
+}
 
+/// Login, menu bar and notifications.
+fn behaviour(g: &mut Gui, ui: &mut Ui) {
     let mut auto = g.autostart;
     row(ui, tr("Open at login"), tr("Start MacPilot automatically when you log in."), |ui| {
         w::switch(ui, &mut auto, tr("Open at login"));
@@ -152,37 +190,41 @@ fn general(g: &mut Gui, ui: &mut Ui) {
         }
         g.save_settings();
     }
-
-    updates(g, ui);
 }
 
 /// What MacPilot may read, the folders it never opens, and the macOS permissions.
 fn privacy(g: &mut Gui, ui: &mut Ui) {
     let mut on = g.settings.file_access;
-    row(ui, tr("Read my files"), tr("Disk and Cleanup read the names, sizes and dates of your files — never their contents."), |ui| {
-        w::switch(ui, &mut on, tr("Read my files"));
+    group(ui, |ui| {
+        row(ui, tr("Read my files"), tr("Disk and Cleanup read the names, sizes and dates of your files — never their contents."), |ui| {
+            w::switch(ui, &mut on, tr("Read my files"));
+        });
     });
     if on != g.settings.file_access {
         if on { g.grant_file_access() } else { g.revoke_file_access() }
     }
 
     if g.settings.file_access {
-        ui.add_space(8.0);
-        ui.label(RichText::new(tr("Don't scan")).strong());
-        ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).size(12.0).color(C::dim(ui)));
-        ui.add_space(4.0);
+        ui.add_space(w::sp::S);
+        ui.label(RichText::new(tr("Don't scan")).semibold());
+        ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).callout().color(C::dim(ui)));
+        ui.add_space(w::sp::XS);
         w::card(ui, |ui| {
             ui.set_min_width(ui.available_width());
             if crate::access_view::folder_checks(g, ui) {
                 g.exclusions_changed();
             }
         });
-        ui.add_space(6.0);
+        ui.add_space(w::sp::S);
     }
 
-    ui.add_space(8.0);
-    ui.label(RichText::new(tr("macOS permissions")).strong());
-    ui.add_space(4.0);
+    ui.add_space(w::sp::S);
+    ui.label(RichText::new(tr("macOS permissions")).semibold());
+    ui.add_space(w::sp::XS);
+    group(ui, |ui| permissions(g, ui));
+}
+
+fn permissions(g: &Gui, ui: &mut Ui) {
     row(ui, tr("Full Disk Access"), tr("Lets MacPilot see other apps' data too (Docker, virtual machines). Optional."), |ui| {
         if ui.button(tr("Open…")).clicked() {
             macpilot::open_full_disk_access_settings();
@@ -206,6 +248,10 @@ fn privacy(g: &mut Gui, ui: &mut Ui) {
 }
 
 fn disk(g: &mut Gui, ui: &mut Ui) {
+    group(ui, |ui| disk_rows(g, ui));
+}
+
+fn disk_rows(g: &mut Gui, ui: &mut Ui) {
     let mut scan = g.settings.scan_on_start;
     row(ui, tr("Scan the home folder at launch"), tr("Needed for the Overview, Cleanup and “Not used” lists. Runs at low priority."), |ui| {
         w::switch(ui, &mut scan, tr("Scan the home folder at launch"));
@@ -248,19 +294,19 @@ fn disk(g: &mut Gui, ui: &mut Ui) {
 
 fn updates(g: &mut Gui, ui: &mut Ui) {
     let Some(_) = macpilot::update::repo() else { return };
-    ui.add_space(12.0);
+    ui.add_space(w::sp::M);
     if let Some(u) = g.update.clone() {
         w::card(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(trf("MacPilot {0} is available", &[&u.version])).strong().color(C::green()));
+                    ui.label(RichText::new(trf("MacPilot {0} is available", &[&u.version])).semibold().color(C::green()));
                     ui.label(
                         RichText::new(trf(
                             "You have {0}. Download the new version and replace the app in Applications.",
                             &[&env!("CARGO_PKG_VERSION")],
                         ))
-                        .size(12.0)
+                        .callout()
                         .color(C::dim(ui)),
                     );
                 });
@@ -271,7 +317,7 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
                 });
             });
         });
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
     }
     let mut on = g.settings.check_updates;
     let status = if g.update_checking {
@@ -284,12 +330,16 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
         String::new()
     };
     let hint = format!("{} {}", tr("Once a day MacPilot asks GitHub for the latest release. Nothing else is sent."), status);
-    row(ui, tr("Check for updates"), &hint, |ui| {
-        w::switch(ui, &mut on, tr("Check for updates"));
-        if ui.add_enabled(!g.update_checking, egui::Button::new(tr("Check now"))).clicked() {
-            g.check_updates();
-        }
+    let mut check = false;
+    group(ui, |ui| {
+        row(ui, tr("Check for updates"), &hint, |ui| {
+            w::switch(ui, &mut on, tr("Check for updates"));
+            check = ui.add_enabled(!g.update_checking, egui::Button::new(tr("Check now"))).clicked();
+        });
     });
+    if check {
+        g.check_updates();
+    }
     if on != g.settings.check_updates {
         g.settings.check_updates = on;
         g.save_settings();

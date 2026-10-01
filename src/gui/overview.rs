@@ -3,7 +3,7 @@
 use eframe::egui::{self, Color32, RichText, Ui};
 use macpilot::{disk, fmt, tr, trf};
 
-use crate::widgets::{self as w, C};
+use crate::widgets::{self as w, C, Txt};
 use crate::{AppsMode, CleanMode, DiskMode, Gui, Page, ProcView, Sel};
 
 struct Rec {
@@ -40,8 +40,10 @@ fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec
         return;
     }
     // On battery: apps that drain it.
-    if let Some(gr) =
-        groups.iter().filter(|gr| gr.power.is_some_and(|p| p >= 4.0)).max_by(|a, b| a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)))
+    if let Some(gr) = groups
+        .iter()
+        .filter(|gr| !gr.safety.blocked() && gr.power.is_some_and(|p| p >= 4.0))
+        .max_by(|a, b| a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)))
     {
         let key = gr.key.clone();
         out.push(Rec {
@@ -220,7 +222,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let caches: u64 = g.targets.iter().filter(|t| t.cleanable()).filter_map(|t| t.stat.map(|s| s.size)).sum();
     if caches > 500_000_000 {
         out.push(Rec {
-            color: C::green(),
+            color: C::accent(),
             title: trf("{0} of caches and logs", &[&fmt::bytes(caches)]),
             text: tr("Apps recreate them when needed. Safe to clean.").into(),
             button: tr("Clean up"),
@@ -236,7 +238,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let junk_size: u64 = old_junk.iter().map(|j| j.size).sum();
     if junk_size > 200_000_000 {
         out.push(Rec {
-            color: C::green(),
+            color: C::accent(),
             title: trf("{0} of old build folders", &[&fmt::bytes(junk_size)]),
             text: trf(
                 "{0} not changed for {1} still keep node_modules, target, build… They are rebuilt on demand.",
@@ -306,7 +308,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     if let Some(t) = g.targets.iter().find(|t| t.id == "trash") {
         if let Some(st) = t.stat.filter(|s| s.size > 1_000_000_000) {
             out.push(Rec {
-                color: C::green(),
+                color: C::accent(),
                 title: trf("{0} in the Trash", &[&fmt::bytes(st.size)]),
                 text: tr("Deleted files still take space until the Trash is emptied.").into(),
                 button: tr("Open Cleanup"),
@@ -324,9 +326,10 @@ pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f3
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.label(RichText::new(title).color(C::dim(ui)));
-        ui.label(RichText::new(value).size(22.0).strong().color(w::ratio_color(ratio)));
-        ui.label(RichText::new(sub).size(11.5).color(C::dim(ui)));
-        ui.add_space(4.0);
+        ui.add(egui::Label::new(RichText::new(value).metric().color(w::value_color(ui, ratio))).truncate());
+        // One line, so the cards of a row keep the same height; the whole text is in the tooltip.
+        ui.add(egui::Label::new(RichText::new(sub).caption().color(C::dim(ui))).truncate());
+        ui.add_space(w::sp::S);
         let width = ui.available_width();
         match hist {
             Some(h) => {
@@ -335,9 +338,9 @@ pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f3
             }
             None if ratio > 0.0 => {
                 w::bar(ui, ratio, egui::vec2(width, 8.0), w::ratio_color(ratio));
-                ui.add_space(26.0);
+                ui.add_space(w::sp::XL);
             }
-            None => ui.add_space(34.0),
+            None => ui.add_space(w::sp::XXL),
         }
     });
 }
@@ -355,7 +358,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     stat_card(
                         &mut cols[0],
                         "CPU",
-                        format!("{:.0}%", s.cpu_total),
+                        fmt::pct0(s.cpu_total),
                         fmt::n(s.cpu_count as u64, fmt::Noun::Core),
                         s.cpu_total / 100.0,
                         Some(&g.cpu_hist),
@@ -403,22 +406,28 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     );
                 });
 
-                ui.add_space(14.0);
+                ui.add_space(w::sp::L);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("Recommendations")).size(17.0).strong());
+                    ui.label(RichText::new(tr("Recommendations")).section());
                     let scanning = g.scan.as_ref().is_some_and(|s| !s.done()) || g.rescan.is_some();
                     if scanning || g.apps.is_none() || g.orphans.is_none() {
                         ui.spinner();
                         ui.label(RichText::new(tr("checking your Mac…")).color(C::dim(ui)));
                     }
                 });
-                ui.add_space(6.0);
+                ui.add_space(w::sp::S);
                 let recs = recommendations(g);
                 if recs.is_empty() {
                     w::card(ui, |ui| {
                         ui.set_min_width(ui.available_width());
-                        ui.label(RichText::new(tr("✔ All good")).size(16.0).strong().color(C::green()));
-                        ui.label(tr("No problems found. MacPilot keeps checking while it is open."));
+                        ui.horizontal(|ui| {
+                            w::pixel_friend(ui, 48.0);
+                            ui.add_space(w::sp::M);
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(tr("✔ All good")).section());
+                                ui.label(RichText::new(tr("No problems found. MacPilot keeps checking while it is open.")).color(C::dim(ui)));
+                            });
+                        });
                     });
                 }
                 let mut action = None;
@@ -428,19 +437,21 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 40.0), egui::Sense::hover());
                             ui.painter().rect_filled(rect, if w::classic() { 0 } else { 3 }, r.color);
-                            ui.vertical(|ui| {
-                                ui.set_max_width(ui.available_width() - 150.0);
-                                ui.label(RichText::new(&r.title).size(15.0).strong());
-                                ui.label(RichText::new(&r.text).color(C::dim(ui)));
-                            });
+                            // The button takes its room first; the text wraps in what is left.
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if w::plain_button(ui, r.button).clicked() {
                                     action = Some(i);
                                 }
+                                ui.add_space(w::sp::M);
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    ui.label(RichText::new(&r.title).headline());
+                                    ui.label(RichText::new(&r.text).color(C::dim(ui)));
+                                });
                             });
                         });
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(w::sp::S);
                 }
                 if let Some(i) = action {
                     if let Some(r) = recs.into_iter().nth(i) {

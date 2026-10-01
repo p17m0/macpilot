@@ -9,7 +9,7 @@ use macpilot::procs::{self, AppGroup, ProcInfo, Safety, Snapshot};
 use macpilot::{fmt, tr, trf};
 
 use crate::icons;
-use crate::widgets::{self as w, C, Level};
+use crate::widgets::{self as w, C, Level, Txt};
 use crate::{Action, Confirm, DiskMode, Gui, Page, ProcView, Sel, SortKey};
 
 enum Row {
@@ -90,8 +90,9 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
     });
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
+            w::title_bar(ui, tr("Processes"), "", |ui| view_switch(g, ui), |_| {});
             toolbar(g, ui);
-            ui.add_space(8.0);
+            ui.add_space(w::sp::S);
             let rows = build_rows(g);
             table(g, ui, &rows);
         });
@@ -113,26 +114,28 @@ fn toolbar(g: &mut Gui, ui: &mut Ui) {
         if !g.filter.is_empty() && ui.small_button("✕").on_hover_text(tr("Clear search")).clicked() {
             g.filter.clear();
         }
-        ui.add_space(8.0);
-        let before = g.view;
-        w::segmented(ui, &mut g.view, &[(ProcView::Apps, tr("By app")), (ProcView::Flat, tr("All processes")), (ProcView::Tree, tr("Tree"))]);
-        if before != g.view {
-            if g.view == ProcView::Apps && g.sort == SortKey::Pid {
-                g.sort = SortKey::Mem;
-            }
-            if g.view != ProcView::Apps && g.sort == SortKey::Count {
-                g.sort = SortKey::Mem;
-            }
-        }
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
         ui.checkbox(&mut g.only_mine, tr("Only mine"));
     });
+}
+
+fn view_switch(g: &mut Gui, ui: &mut Ui) {
+    let before = g.view;
+    w::segmented(ui, &mut g.view, &[(ProcView::Apps, tr("By app")), (ProcView::Flat, tr("All processes")), (ProcView::Tree, tr("Tree"))]);
+    if before != g.view {
+        if g.view == ProcView::Apps && g.sort == SortKey::Pid {
+            g.sort = SortKey::Mem;
+        }
+        if g.view != ProcView::Apps && g.sort == SortKey::Count {
+            g.sort = SortKey::Mem;
+        }
+    }
 }
 
 fn sort_header(g: &mut Gui, ui: &mut Ui, label: &str, key: SortKey) {
     let arrow = if g.sort == key { if g.sort_desc { " ▼" } else { " ▲" } } else { "" };
     let color = if g.sort == key { C::accent() } else { C::dim(ui) };
-    let r = ui.add(egui::Label::new(RichText::new(format!("{label}{arrow}")).strong().color(color)).sense(Sense::click()));
+    let r = ui.add(egui::Label::new(RichText::new(format!("{label}{arrow}")).semibold().color(color)).sense(Sense::click()));
     if r.clicked() {
         if g.sort == key {
             g.sort_desc = !g.sort_desc;
@@ -145,7 +148,7 @@ fn sort_header(g: &mut Gui, ui: &mut Ui, label: &str, key: SortKey) {
 }
 
 fn plain_header(ui: &mut Ui, label: &str) {
-    ui.label(RichText::new(label).strong().color(C::dim(ui)));
+    ui.label(RichText::new(label).semibold().color(C::dim(ui)));
 }
 
 enum CtxAction {
@@ -173,11 +176,11 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
     let mut tb = TableBuilder::new(ui).striped(true).sense(Sense::click()).cell_layout(egui::Layout::left_to_right(egui::Align::Center));
     tb = if apps {
         tb.column(Column::remainder().at_least(200.0).clip(true))
-            .column(Column::exact(90.0))
+            .column(Column::exact(84.0))
             .column(Column::exact(70.0))
-            .column(Column::exact(80.0))
-            .column(Column::exact(170.0))
-            .column(Column::exact(96.0))
+            .column(Column::exact(76.0))
+            .column(Column::exact(150.0))
+            .column(Column::exact(84.0))
     } else {
         tb.column(Column::remainder().at_least(200.0).clip(true))
             .column(Column::exact(64.0))
@@ -208,7 +211,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
         }
     })
     .body(|body| {
-        body.rows(26.0, rows.len(), |mut row| match &rows[row.index()] {
+        body.rows(28.0, rows.len(), |mut row| match &rows[row.index()] {
             Row::Group(gr) => {
                 let sel = Sel::Group(gr.key.clone());
                 row.set_selected(g.sel.as_ref() == Some(&sel));
@@ -228,7 +231,10 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 row.col(|ui| power_cell(ui, gr.power));
                 row.col(|ui| mem_cell(ui, gr.mem, max_mem));
                 row.col(|ui| {
-                    w::safety_badge(ui, gr.safety);
+                    // Only what is not simply yours is marked: the exceptions stand out.
+                    if gr.safety != Safety::User {
+                        w::safety_badge(ui, gr.safety);
+                    }
                 });
                 let resp = row.response();
                 if resp.clicked() {
@@ -270,7 +276,9 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                     }
                 });
                 row.col(|ui| {
-                    w::safety_badge(ui, p.safety);
+                    if p.safety != Safety::User {
+                        w::safety_badge(ui, p.safety);
+                    }
                 });
                 let resp = row.response();
                 if resp.clicked() {
@@ -372,13 +380,13 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     } else if let Some(p) = selected_proc(g) {
         proc_detail(g, ui, &snap, &p);
     } else {
-        ui.add_space(40.0);
+        ui.add_space(w::sp::XXL);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new(tr("Select a process or an app")).size(16.0).color(C::dim(ui)));
-            ui.add_space(6.0);
+            ui.label(RichText::new(tr("Select a process or an app")).size(w::ty::HEADLINE).color(C::dim(ui)));
+            ui.add_space(w::sp::S);
             ui.label(RichText::new(tr("You will see what it is and whether it is safe to stop.")).color(C::dim(ui)));
         });
-        ui.add_space(24.0);
+        ui.add_space(w::sp::XL);
         summary(ui, &snap);
     }
 }
@@ -388,8 +396,8 @@ fn summary(ui: &mut Ui, s: &Snapshot) {
     for (title, by_cpu) in [(tr("Most memory"), false), (tr("Most CPU"), true)] {
         w::card(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.label(RichText::new(title).strong());
-            ui.add_space(4.0);
+            ui.label(RichText::new(title).semibold());
+            ui.add_space(w::sp::XS);
             if by_cpu {
                 groups.sort_by(|a, b| b.cpu.total_cmp(&a.cpu));
             } else {
@@ -408,7 +416,7 @@ fn summary(ui: &mut Ui, s: &Snapshot) {
                 });
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
     }
 }
 
@@ -417,8 +425,8 @@ fn stats_row(ui: &mut Ui, items: &[(&str, String, Color32)]) {
         for (i, (k, v, c)) in items.iter().enumerate() {
             w::card(&mut cols[i], |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.label(RichText::new(*k).size(11.0).color(C::dim(ui)));
-                ui.label(RichText::new(v).size(17.0).strong().color(*c));
+                ui.label(RichText::new(*k).caption().color(C::dim(ui)));
+                ui.label(RichText::new(v).section().color(*c));
             });
         }
     });
@@ -442,7 +450,7 @@ fn ports_block(g: &Gui, ui: &mut Ui, pids: &[u32]) {
     if all.is_empty() {
         return;
     }
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     let local = all.iter().all(|p| p.ends_with(&format!("({})", tr("local"))));
     let text = if local { tr("Listens on this Mac only.") } else { tr("Accepts connections from the network.") };
     w::note(ui, C::purple(), &trf("Open ports: {0}", &[&all.join(", ")]), text);
@@ -451,15 +459,15 @@ fn ports_block(g: &Gui, ui: &mut Ui, pids: &[u32]) {
 fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
     ui.horizontal(|ui| {
         icons::process(ui, gr.app.as_deref(), 32.0);
-        ui.label(RichText::new(&gr.label).size(22.0).strong());
+        ui.label(RichText::new(&gr.label).title());
     });
     let kind = if gr.app.is_some() { tr("App") } else { tr("Program") };
     ui.label(RichText::new(format!("{kind} · {}", fmt::n(gr.pids.len() as u64, fmt::Noun::Process))).color(C::dim(ui)));
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     if let Some(m) = gr.pids.iter().filter_map(|p| s.get(*p)).max_by_key(|p| (p.is_main_app, p.mem)) {
         ui.label(procs::describe(m));
     }
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     stats_row(
         ui,
         &[
@@ -469,7 +477,7 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
         ],
     );
     if gr.pids.len() >= 200 {
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
         w::note(
             ui,
             C::red(),
@@ -477,18 +485,18 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
             tr("That many copies of one app is abnormal and usually means it is stuck in a loop. Quit and reopen it."),
         );
     }
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     safety_block(ui, gr.safety);
     ports_block(g, ui, &gr.pids);
-    ui.add_space(10.0);
+    ui.add_space(w::sp::M);
     action_buttons(g, ui, gr.safety, gr.app.is_some(), None);
     if let Some(a) = &gr.app {
-        ui.add_space(6.0);
+        ui.add_space(w::sp::S);
         w::kv(ui, tr("Location"), fmt::path(a));
     }
-    ui.add_space(12.0);
-    ui.label(RichText::new(tr("Processes (by memory)")).strong());
-    ui.add_space(4.0);
+    ui.add_space(w::sp::M);
+    ui.label(RichText::new(tr("Processes (by memory)")).semibold());
+    ui.add_space(w::sp::XS);
     let mut members: Vec<&ProcInfo> = gr.pids.iter().filter_map(|p| s.get(*p)).collect();
     members.sort_by_key(|a| std::cmp::Reverse(a.mem));
     let mut jump = None;
@@ -519,12 +527,12 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
 fn proc_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, p: &ProcInfo) {
     ui.horizontal(|ui| {
         icons::process(ui, p.app.as_deref(), 32.0);
-        ui.label(RichText::new(&p.name).size(22.0).strong());
+        ui.label(RichText::new(&p.name).title());
     });
     ui.label(RichText::new(format!("PID {} · {} · {}", p.pid, p.user, trf("running for {0}", &[&fmt::duration(p.run_time)]))).color(C::dim(ui)));
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     ui.label(procs::describe(p));
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     stats_row(
         ui,
         &[
@@ -533,12 +541,12 @@ fn proc_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, p: &ProcInfo) {
             (tr("Disk I/O"), fmt::bytes(p.disk_read + p.disk_write), C::text(ui)),
         ],
     );
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     safety_block(ui, p.safety);
     ports_block(g, ui, &[p.pid]);
-    ui.add_space(10.0);
+    ui.add_space(w::sp::M);
     action_buttons(g, ui, p.safety, p.is_main_app, Some(p));
-    ui.add_space(12.0);
+    ui.add_space(w::sp::M);
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         w::kv(ui, tr("Status"), if p.stopped { tr("paused").to_string() } else { p.status.to_string() });
@@ -566,13 +574,13 @@ fn proc_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, p: &ProcInfo) {
         }
     });
     if !p.cmd.is_empty() {
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
         ui.label(RichText::new(tr("Command line")).color(C::dim(ui)));
         let mut cmd = p.cmd.clone();
         ui.add(egui::TextEdit::multiline(&mut cmd).font(egui::TextStyle::Monospace).desired_rows(2).desired_width(f32::INFINITY));
     }
     if p.exe.is_none() && !s.is_root() {
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
         ui.label(
             RichText::new(tr("This process belongs to another user (usually root): macOS hides its details from regular apps.")).color(C::dim(ui)),
         );

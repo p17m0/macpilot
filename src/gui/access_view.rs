@@ -5,7 +5,7 @@ use macpilot::disk::PERSONAL;
 use macpilot::{fmt, tr};
 
 use crate::Gui;
-use crate::widgets::{self as w, C};
+use crate::widgets::{self as w, C, Txt};
 
 /// Readable name of a personal folder key.
 pub fn folder_name(key: &str) -> &'static str {
@@ -26,13 +26,13 @@ fn folder_row(ui: &mut Ui, name: &str, path: &std::path::Path, right: impl FnOnc
         ui.set_min_height(30.0);
         w::file_icon(ui, true, false, false);
         ui.label(name);
-        ui.label(RichText::new(fmt::path(path)).size(12.0).color(C::dim(ui)));
+        ui.label(RichText::new(fmt::path(path)).callout().color(C::dim(ui)));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), right);
     });
 }
 
 fn group_title(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(12.0).strong().color(C::dim(ui)));
+    ui.label(RichText::new(text).callout().semibold().color(C::dim(ui)));
     ui.add_space(2.0);
 }
 
@@ -59,7 +59,7 @@ pub fn folder_checks(g: &mut Gui, ui: &mut Ui) -> bool {
         });
     }
 
-    ui.add_space(12.0);
+    ui.add_space(w::sp::M);
     group_title(ui, tr("Other folders"));
     let others: Vec<std::path::PathBuf> = g.settings.excluded_paths().into_iter().filter(|p| !standard.contains(p)).collect();
     if others.is_empty() {
@@ -77,7 +77,7 @@ pub fn folder_checks(g: &mut Gui, ui: &mut Ui) -> bool {
             }
         });
     }
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     if ui.button(tr("Add folder…")).clicked() {
         for p in crate::mac::choose_folders(tr("Don't scan"), tr("MacPilot will never open the folders you choose.")) {
             g.settings.set_excluded(&p, true);
@@ -96,23 +96,23 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 }
 
 fn ask(g: &mut Gui, ui: &mut Ui) {
-    ui.add_space(30.0);
+    ui.add_space(w::sp::XXL);
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.label(RichText::new(tr("Let MacPilot look at your files?")).size(20.0).strong());
-        ui.add_space(6.0);
+        ui.label(RichText::new(tr("Let MacPilot look at your files?")).title());
+        ui.add_space(w::sp::S);
         ui.label(tr(
             "To show what takes space and what can be cleaned up, MacPilot reads the names, sizes and dates of the files in your home folder. It never opens what is inside them, sends nothing anywhere and removes nothing without your confirmation.",
         ));
-        ui.add_space(10.0);
-        ui.label(RichText::new(tr("Don't scan")).strong());
-        ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).size(12.0).color(C::dim(ui)));
-        ui.add_space(6.0);
+        ui.add_space(w::sp::M);
+        ui.label(RichText::new(tr("Don't scan")).semibold());
+        ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).callout().color(C::dim(ui)));
+        ui.add_space(w::sp::S);
         if folder_checks(g, ui) {
             g.save_settings();
             macpilot::disk::set_excluded(g.settings.excluded_paths());
         }
-        ui.add_space(10.0);
+        ui.add_space(w::sp::M);
         w::note(
             ui,
             C::accent(),
@@ -121,7 +121,7 @@ fn ask(g: &mut Gui, ui: &mut Ui) {
                 "macOS itself will ask separately about Desktop, Documents, Downloads and iCloud Drive — those are its standard dialogs. Allow the ones you want; MacPilot works with whatever you allow.",
             ),
         );
-        ui.add_space(12.0);
+        ui.add_space(w::sp::M);
         ui.horizontal(|ui| {
             if w::big_button(ui, tr("Allow and scan"), C::accent(), true).clicked() {
                 g.grant_file_access();
@@ -131,6 +131,6 @@ fn ask(g: &mut Gui, ui: &mut Ui) {
             }
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(w::sp::M);
     ui.label(RichText::new(tr("Processes, Battery, Apps and Startup work without it.")).color(C::dim(ui)));
 }

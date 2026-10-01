@@ -11,6 +11,16 @@
 - Tests for excluded folders (scan, measuring, listing, duplicates) and for the leftover search.
 - README: how to open a non-notarized release on macOS 15 and later (right-click → Open no longer skips the warning).
 - **Real app icons** in Apps, Processes and on the Disk page, as in Finder (grey in the Classic style). Processes that are not apps get the Unix executable icon.
+- **Design pass** after the Macintosh classics (Tognazzini's guidelines, Atkinson's pixels, Kare's icons):
+  - **Type**: real weights of San Francisco — Bold page titles, Semibold headings and names (egui's "strong" only changed the color). Small text uses SF Text instead of the tighter Display cut, SF Mono replaces the light default monospace, body text is 13 pt and darker. One scale of seven sizes instead of sixteen; Classic gets a bold pixel font too.
+  - **Spacing** on a 4-point grid; wider page margins; table rows 28 pt (44 pt with two lines).
+  - **Every page starts the same way**: title, its sections next to it, its actions on the right. Processes and Disk got titles; Disk's scan buttons moved up there and its sections read from the overview to the details.
+  - **Color only where something needs attention**: normal values in plain text, meters in the accent color, yellow and red for real problems. Only system and critical processes are marked. Cleanup's buttons are tinted instead of a dozen bright green ones, and its cards come biggest first.
+  - **Startup** shows names for people ("MacKeeper — Reminder") with the app's icon; the identifier is underneath and the program path on hover.
+  - **Settings** in grouped boxes with dividers, as in System Settings.
+  - **Disk → Summary**: gaps between the parts of the bar; pointing at a part lights up its line and back; what MacPilot cannot see is hatched instead of red. "What changed" shows the folder's name first.
+  - **Icons**: a new sidebar set on one grid with filled variants for the selected page; Cleanup cards show the app they belong to (Xcode, Mail, Docker…) or the folder; a small pixel computer for empty and all-good states.
+  - Same-height cards on the Overview, sparklines with a baseline, `commands` in SF Mono, percentages spaced as each language wants, and MacPilot no longer advises quitting itself for its energy use.
 
 ## 0.5.0
 

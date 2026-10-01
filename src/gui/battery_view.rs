@@ -4,8 +4,9 @@ use eframe::egui::{self, Color32, Pos2, Rect, RichText, Stroke, Ui, Vec2};
 use macpilot::battery::{self, Battery, RATED_CYCLES, Sample};
 use macpilot::{fmt, tr, trf};
 
+use crate::icons;
 use crate::overview::stat_card;
-use crate::widgets::{self as w, C};
+use crate::widgets::{self as w, C, Txt};
 use crate::{Gui, Page, ProcView, Sel};
 
 /// Minutes as "1 h 25 min".
@@ -15,7 +16,7 @@ fn minutes(m: u32) -> String {
 
 /// Short text for the sidebar meter and the status line: ("27%", "1 h 8 min left").
 pub fn short_state(b: &Battery) -> (String, String) {
-    let pct = format!("{}%", b.percent);
+    let pct = fmt::pct0(b.percent as f32);
     let state = if b.charging {
         b.time_to_full.map(|m| trf("{0} to full", &[&minutes(m)])).unwrap_or_else(|| tr("charging").into())
     } else if b.plugged {
@@ -87,16 +88,16 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     stat_card(&mut cols[3], tr("Temperature"), fmt::celsius(b.temperature), tr("of the battery").into(), hot, None);
                 });
 
-                ui.add_space(10.0);
+                ui.add_space(w::sp::M);
                 advice(g, ui, &b);
 
-                ui.add_space(14.0);
+                ui.add_space(w::sp::L);
                 history(g, ui);
 
-                ui.add_space(14.0);
+                ui.add_space(w::sp::L);
                 energy_users(g, ui, &b);
 
-                ui.add_space(14.0);
+                ui.add_space(w::sp::L);
                 awake(g, ui, &info.blockers);
             });
         });
@@ -146,7 +147,7 @@ fn advice(g: &mut Gui, ui: &mut Ui, b: &Battery) {
         any = true;
     }
     if let Some(d) = battery::drain_per_hour(&recent(&g.battery_hist, 7)) {
-        let mut text = trf("On battery your Mac uses about {0} of charge per hour.", &[&format!("{:.0}%", d)]);
+        let mut text = trf("On battery your Mac uses about {0} of charge per hour.", &[&fmt::pct0(d)]);
         if d > 0.1 {
             text += " ";
             text += &trf("A full charge lasts about {0} with your usual use.", &[&fmt::duration((100.0 / d * 3600.0) as u64)]);
@@ -174,12 +175,12 @@ fn local_tm(ts: i64) -> libc::tm {
 
 fn history(g: &mut Gui, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(tr("Charge history")).size(17.0).strong());
+        ui.label(RichText::new(tr("Charge history")).section());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             w::segmented(ui, &mut g.battery_days, &[(1, tr("24 hours")), (7, tr("7 days"))]);
         });
     });
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     let days = g.battery_days;
     let samples = recent(&g.battery_hist, days);
     w::card(ui, |ui| {
@@ -201,7 +202,13 @@ fn history(g: &mut Gui, ui: &mut Ui) {
         let dim = C::dim(ui);
         for level in [0, 50, 100] {
             p.line_segment([Pos2::new(plot.left(), y(level)), Pos2::new(plot.right(), y(level))], Stroke::new(1.0, C::track(ui)));
-            p.text(Pos2::new(plot.left() - 6.0, y(level)), egui::Align2::RIGHT_CENTER, format!("{level}%"), egui::FontId::proportional(10.5), dim);
+            p.text(
+                Pos2::new(plot.left() - 6.0, y(level)),
+                egui::Align2::RIGHT_CENTER,
+                format!("{level}%"),
+                egui::FontId::proportional(w::ty::CAPTION),
+                dim,
+            );
         }
         // Time ticks: every 6 hours, or every day at midnight.
         let step = if days == 1 { 6 * 3600 } else { 86_400 };
@@ -212,7 +219,7 @@ fn history(g: &mut Gui, ui: &mut Ui) {
             let tt = local_tm(tick);
             let label = if days == 1 { format!("{:02}:00", tt.tm_hour) } else { format!("{:02}.{:02}", tt.tm_mday, tt.tm_mon + 1) };
             p.line_segment([Pos2::new(x(tick), plot.top()), Pos2::new(x(tick), plot.bottom())], Stroke::new(1.0, C::track(ui).gamma_multiply(0.6)));
-            p.text(Pos2::new(x(tick), plot.bottom() + 4.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(10.5), dim);
+            p.text(Pos2::new(x(tick), plot.bottom() + 4.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(w::ty::CAPTION), dim);
             tick += step;
         }
         // Plugged-in stretches are shaded; gaps (the app was not running) break the line.
@@ -244,7 +251,7 @@ fn history(g: &mut Gui, ui: &mut Ui) {
                 let tt = local_tm(s.ts);
                 p.circle_filled(Pos2::new(x(s.ts), y(s.percent)), 3.5, C::text(ui));
                 let what = if s.plugged { tr("on power adapter").to_string() } else { fmt::watts(-s.watts) };
-                resp.on_hover_text(format!("{:02}:{:02} · {}% · {}", tt.tm_hour, tt.tm_min, s.percent, what));
+                resp.on_hover_text(format!("{:02}:{:02} · {} · {}", tt.tm_hour, tt.tm_min, fmt::pct0(s.percent as f32), what));
             }
         }
         ui.horizontal(|ui| {
@@ -256,12 +263,12 @@ fn history(g: &mut Gui, ui: &mut Ui) {
 
 fn legend(ui: &mut Ui, c: Color32, text: &str) {
     w::dot(ui, c);
-    ui.label(RichText::new(text).size(11.5).color(C::dim(ui)));
-    ui.add_space(8.0);
+    ui.label(RichText::new(text).caption().color(C::dim(ui)));
+    ui.add_space(w::sp::S);
 }
 
 fn energy_users(g: &mut Gui, ui: &mut Ui, b: &Battery) {
-    ui.label(RichText::new(tr("Using energy now")).size(17.0).strong());
+    ui.label(RichText::new(tr("Using energy now")).section());
     let mut groups: Vec<_> = g.snap.groups().into_iter().filter(|gr| gr.power.is_some_and(|p| p >= 0.05)).collect();
     groups.sort_by(|a, b| b.power.unwrap_or(0.0).total_cmp(&a.power.unwrap_or(0.0)));
     groups.truncate(8);
@@ -273,7 +280,7 @@ fn energy_users(g: &mut Gui, ui: &mut Ui, b: &Battery) {
         })
         .color(C::dim(ui)),
     );
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         if groups.is_empty() {
@@ -285,20 +292,24 @@ fn energy_users(g: &mut Gui, ui: &mut Ui, b: &Battery) {
         for gr in &groups {
             let watts = gr.power.unwrap_or(0.0);
             ui.horizontal(|ui| {
-                let name =
-                    ui.add_sized([220.0, 20.0], egui::Label::new(RichText::new(&gr.label).color(C::text(ui))).truncate().sense(egui::Sense::click()));
+                let name = ui
+                    .allocate_ui_with_layout(Vec2::new(220.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        icons::process(ui, gr.app.as_deref(), 18.0);
+                        ui.add(egui::Label::new(RichText::new(&gr.label).color(C::text(ui))).truncate().sense(egui::Sense::click()))
+                    })
+                    .inner;
                 if name.clicked() {
                     open = Some(gr.key.clone());
                 }
-                let color = if watts >= 4.0 {
-                    C::red()
+                let (bar, text) = if watts >= 4.0 {
+                    (C::red(), C::red())
                 } else if watts >= 1.0 {
-                    C::yellow()
+                    (C::yellow(), C::yellow())
                 } else {
-                    C::green()
+                    (C::accent(), C::text(ui))
                 };
-                w::bar(ui, watts / max, Vec2::new((ui.available_width() - 90.0).max(60.0), 8.0), color);
-                ui.label(RichText::new(fmt::watts(watts)).color(color));
+                w::bar(ui, watts / max, Vec2::new((ui.available_width() - 90.0).max(60.0), 8.0), bar);
+                ui.label(RichText::new(fmt::watts(watts)).color(text));
             });
         }
         if let Some(key) = open {
@@ -310,9 +321,9 @@ fn energy_users(g: &mut Gui, ui: &mut Ui, b: &Battery) {
 }
 
 fn awake(g: &mut Gui, ui: &mut Ui, blockers: &[battery::SleepBlocker]) {
-    ui.label(RichText::new(tr("Keeping the Mac awake")).size(17.0).strong());
+    ui.label(RichText::new(tr("Keeping the Mac awake")).section());
     ui.label(RichText::new(tr("While these apps ask for it, the Mac does not sleep on its own and the battery keeps draining.")).color(C::dim(ui)));
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         if blockers.is_empty() {
@@ -322,13 +333,13 @@ fn awake(g: &mut Gui, ui: &mut Ui, blockers: &[battery::SleepBlocker]) {
         for bl in blockers {
             let name = blocker_name(g, bl);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(&name).strong());
+                ui.label(RichText::new(&name).semibold());
                 if bl.display {
                     w::badge(ui, tr("keeps the display on"), C::yellow());
                 }
                 ui.label(RichText::new(trf("for {0}", &[&fmt::duration(bl.seconds)])).color(C::dim(ui)));
                 if let Some(why) = reason_text(&bl.reason) {
-                    ui.label(RichText::new(format!("· {why}")).size(11.5).color(C::dim(ui)));
+                    ui.label(RichText::new(format!("· {why}")).caption().color(C::dim(ui)));
                 }
             });
         }

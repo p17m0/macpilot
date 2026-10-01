@@ -8,7 +8,7 @@ use macpilot::apps::AppInfo;
 use macpilot::{disk, fmt, tr, trf};
 
 use crate::icons;
-use crate::widgets::{self as w, C, Level};
+use crate::widgets::{self as w, C, Level, Txt};
 use crate::{Action, AppsMode, Confirm, Gui};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
@@ -19,12 +19,19 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
     }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("Apps")).size(24.0).strong());
-                ui.add_space(12.0);
-                w::segmented(ui, &mut g.apps_mode, &[(AppsMode::Installed, tr("Installed")), (AppsMode::Leftovers, tr("Leftovers of removed apps"))]);
-            });
-            ui.add_space(8.0);
+            w::title_bar(
+                ui,
+                tr("Apps"),
+                "",
+                |ui| {
+                    w::segmented(
+                        ui,
+                        &mut g.apps_mode,
+                        &[(AppsMode::Installed, tr("Installed")), (AppsMode::Leftovers, tr("Leftovers of removed apps"))],
+                    );
+                },
+                |_| {},
+            );
             match g.apps_mode {
                 AppsMode::Installed => installed(g, ui),
                 AppsMode::Leftovers => leftovers(g, ui),
@@ -45,7 +52,7 @@ fn installed(g: &mut Gui, ui: &mut Ui) {
         );
         ui.label(RichText::new(trf("{0} apps, {1}", &[&apps.len(), &fmt::bytes(total)])).color(C::dim(ui)));
     });
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     let f = g.apps_filter.to_lowercase();
     let list: Vec<&AppInfo> =
         apps.iter().filter(|a| f.is_empty() || a.name.to_lowercase().contains(&f) || a.bundle_id.to_lowercase().contains(&f)).collect();
@@ -63,20 +70,20 @@ fn installed(g: &mut Gui, ui: &mut Ui) {
         .header(24.0, |mut h| {
             for t in [tr("App"), tr("Version"), tr("Size"), tr("Last opened"), ""] {
                 h.col(|ui| {
-                    ui.label(RichText::new(t).strong().color(C::dim(ui)));
+                    ui.label(RichText::new(t).semibold().color(C::dim(ui)));
                 });
             }
         })
         .body(|body| {
-            body.rows(30.0, list.len(), |mut row| {
+            body.rows(44.0, list.len(), |mut row| {
                 let a = list[row.index()];
                 row.set_selected(g.app_sel.as_ref() == Some(&a.path));
                 row.col(|ui| {
                     icons::app(ui, &a.path, 24.0);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.label(RichText::new(&a.name).strong());
-                        ui.label(RichText::new(&a.bundle_id).size(11.0).color(C::dim(ui)));
+                        ui.label(RichText::new(&a.name).semibold());
+                        ui.label(RichText::new(&a.bundle_id).caption().color(C::dim(ui)));
                     });
                 });
                 row.col(|ui| {
@@ -106,20 +113,20 @@ fn installed(g: &mut Gui, ui: &mut Ui) {
 
 fn detail(g: &mut Gui, ui: &mut Ui) {
     let Some(app) = g.app_sel.as_ref().and_then(|p| g.apps.as_ref()?.iter().find(|a| &a.path == p)).cloned() else {
-        ui.add_space(40.0);
+        ui.add_space(w::sp::XXL);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new(tr("Select an app")).size(16.0).color(C::dim(ui)));
-            ui.add_space(6.0);
+            ui.label(RichText::new(tr("Select an app")).size(w::ty::HEADLINE).color(C::dim(ui)));
+            ui.add_space(w::sp::S);
             ui.label(RichText::new(tr("You will see how much space it takes with its data, and can uninstall it completely.")).color(C::dim(ui)));
         });
         return;
     };
     ui.horizontal(|ui| {
         icons::app(ui, &app.path, 40.0);
-        ui.label(RichText::new(&app.name).size(22.0).strong());
+        ui.label(RichText::new(&app.name).title());
     });
     ui.label(RichText::new(format!("{} · {}", app.bundle_id, app.version)).color(C::dim(ui)));
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     let left = g.leftovers.get(&app.path).cloned();
     let left_size: u64 = left.iter().flatten().map(|(_, s)| s).sum();
     w::card(ui, |ui| {
@@ -130,10 +137,10 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
         w::kv(ui, tr("Location"), fmt::path(&app.path));
     });
     if let Some(t) = app.last_used.filter(|t| disk::now_unix() - t > 180 * 86_400) {
-        ui.add_space(8.0);
+        ui.add_space(w::sp::S);
         w::note(ui, C::yellow(), &trf("Not opened for {0}", &[&fmt::age_in(t)]), tr("If you no longer use it, uninstall it together with its data."));
     }
-    ui.add_space(10.0);
+    ui.add_space(w::sp::M);
     if app.protected {
         w::note(ui, C::red(), tr("Built into macOS"), tr("This app is part of the system and cannot be removed."));
         return;
@@ -167,9 +174,9 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     if running {
         ui.label(RichText::new(tr("The app is running — quit it before uninstalling.")).color(C::yellow()));
     }
-    ui.add_space(12.0);
-    ui.label(RichText::new(tr("Files it keeps in your Library")).strong());
-    ui.add_space(4.0);
+    ui.add_space(w::sp::M);
+    ui.label(RichText::new(tr("Files it keeps in your Library")).semibold());
+    ui.add_space(w::sp::XS);
     match left {
         None => {
             ui.spinner();
@@ -233,7 +240,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                     ))
                     .color(C::dim(ui)),
                 );
-                ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::yellow()));
+                ui.label(RichText::new(fmt::bytes(total)).metric().color(C::yellow()));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if w::big_button(ui, &trf("Move {0} to Trash · {1}", &[&chosen.len(), &fmt::bytes(chosen_size)]), C::red(), !chosen.is_empty())
@@ -260,11 +267,11 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
         });
         ui.label(
             RichText::new(tr("Found by bundle id in every place apps keep data in your Library (Containers, Application Support, Caches, Logs, Preferences, WebKit, cookies…) and by the app's name. Apple's data, installed apps and their helpers are skipped."))
-                .size(11.5)
+                .caption()
                 .color(C::dim(ui)),
         );
     });
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     if orphans.is_empty() {
         w::empty(ui, tr("No leftovers found 👍"));
         return;
@@ -281,12 +288,12 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
         .header(24.0, |mut h| {
             for t in ["", tr("Belonged to"), tr("Size"), tr("Changed")] {
                 h.col(|ui| {
-                    ui.label(RichText::new(t).strong().color(C::dim(ui)));
+                    ui.label(RichText::new(t).semibold().color(C::dim(ui)));
                 });
             }
         })
         .body(|body| {
-            body.rows(40.0, orphans.len(), |mut row| {
+            body.rows(44.0, orphans.len(), |mut row| {
                 let o = &orphans[row.index()];
                 row.col(|ui| {
                     let mut on = g.orphans_checked.contains(o.key());
@@ -298,15 +305,15 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&o.name).strong());
-                            ui.label(RichText::new(&o.id).size(11.0).color(C::dim(ui)));
+                            ui.label(RichText::new(&o.name).semibold());
+                            ui.label(RichText::new(&o.id).caption().color(C::dim(ui)));
                             if o.may_hold_documents() {
                                 w::badge(ui, tr("may contain your documents"), C::yellow())
                                     .on_hover_text(tr("Sandboxed apps keep files you created (images, projects, notes) inside their container. Look inside before removing."));
                             }
                         });
                         let all: Vec<String> = o.items.iter().map(|(p, _)| fmt::path(p)).collect();
-                        ui.label(RichText::new(format!("{} · {}", fmt::n(o.items.len() as u64, fmt::Noun::Item), places(o))).size(11.0).color(C::dim(ui)))
+                        ui.label(RichText::new(format!("{} · {}", fmt::n(o.items.len() as u64, fmt::Noun::Item), places(o))).caption().color(C::dim(ui)))
                             .on_hover_text(all.join("\n"));
                     });
                 });

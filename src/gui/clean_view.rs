@@ -8,7 +8,8 @@ use macpilot::clean::{self, Kind};
 use macpilot::disk::{self, DelSafety};
 use macpilot::{fmt, tr, trf};
 
-use crate::widgets::{self as w, C, Level};
+use crate::icons;
+use crate::widgets::{self as w, C, Level, Txt};
 use crate::{Action, CleanMode, Confirm, DiskMode, Gui, Page};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
@@ -18,12 +19,15 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
     }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("Cleanup")).size(24.0).strong());
-                ui.add_space(12.0);
-                w::segmented(ui, &mut g.clean_mode, &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk"))]);
-            });
-            ui.add_space(8.0);
+            w::title_bar(
+                ui,
+                tr("Cleanup"),
+                "",
+                |ui| {
+                    w::segmented(ui, &mut g.clean_mode, &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk"))]);
+                },
+                |_| {},
+            );
             match g.clean_mode {
                 CleanMode::System => system(g, ui),
                 CleanMode::Dev => dev(g, ui),
@@ -39,7 +43,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.label(RichText::new(tr("Can be freed safely")).color(C::dim(ui)));
             ui.horizontal(|ui| {
-                ui.label(RichText::new(fmt::bytes(safe_total)).size(30.0).strong().color(C::green()));
+                ui.label(RichText::new(fmt::bytes(safe_total)).metric().color(C::text(ui)));
                 if measuring {
                     ui.spinner();
                 }
@@ -52,9 +56,9 @@ fn system(g: &mut Gui, ui: &mut Ui) {
             }
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(w::sp::M);
     stale_banner(g, ui);
-    ui.add_space(8.0);
+    ui.add_space(w::sp::S);
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
         let cols = ((ui.available_width() / 360.0).floor() as usize).clamp(1, 4);
         // Places that do not exist on this Mac are not shown.
@@ -65,6 +69,15 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                 t.kind == Kind::Trash || (disk::present(&t.path) && t.stat.is_none_or(|s| s.size > 0))
             })
             .collect();
+        // Biggest first, once everything is measured (cards do not jump around while sizes come in).
+        let mut shown = shown;
+        if !measuring {
+            let key = |i: &usize| {
+                let t = &g.targets[*i];
+                (t.kind == Kind::Trash, std::cmp::Reverse(t.stat.map(|s| s.size).unwrap_or(0)))
+            };
+            shown.sort_by_key(key);
+        }
         let n = shown.len();
         let mut action: Option<(usize, CardAction)> = None;
         for start in (0..n).step_by(cols) {
@@ -79,7 +92,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                     }
                 }
             });
-            ui.add_space(8.0);
+            ui.add_space(w::sp::S);
         }
         if let Some((i, a)) = action {
             match a {
@@ -102,6 +115,22 @@ enum CardAction {
     EmptyTrash,
 }
 
+/// What a cleanup place looks like: the app it belongs to when there is one (Xcode, Mail, Docker…),
+/// otherwise the place's own Finder icon.
+fn target_icon(t: &clean::Target) -> PathBuf {
+    let xcode = "/Applications/Xcode.app";
+    let app = match t.id {
+        "derived" | "devsupport" | "previews" | "archives" | "simcache" => Some(xcode.to_string()),
+        "simulators" => Some(format!("{xcode}/Contents/Developer/Applications/Simulator.app")),
+        "logs" => Some("/System/Applications/Utilities/Console.app".into()),
+        "maildl" => Some("/System/Applications/Mail.app".into()),
+        "mobilebackup" | "ipsw" => Some("/System/Library/CoreServices/Finder.app".into()),
+        "docker" => Some("/Applications/Docker.app".into()),
+        _ => None,
+    };
+    app.map(PathBuf::from).filter(|p| p.exists()).unwrap_or_else(|| t.path.clone())
+}
+
 fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
     let t = &g.targets[i];
     let exists = disk::present(&t.path);
@@ -110,7 +139,8 @@ fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
         ui.set_min_width(ui.available_width());
         ui.set_min_height(150.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(t.label).size(15.0).strong());
+            icons::app(ui, &target_icon(t), 22.0);
+            ui.label(RichText::new(t.label).headline());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match t.kind {
                 Kind::Clean => {
                     w::del_badge(ui, clean::target_safety(t));
@@ -126,21 +156,21 @@ fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
             (true, Some(s)) => (fmt::bytes(s.size), w::size_color(ui, s.size)),
             (true, None) => (tr("measuring…").to_string(), C::dim(ui)),
         };
-        ui.label(RichText::new(txt).size(22.0).strong().color(color));
-        ui.label(RichText::new(fmt::path(&t.path)).size(11.5).color(C::dim(ui)));
+        ui.label(RichText::new(txt).title().color(color));
+        ui.label(RichText::new(fmt::path(&t.path)).caption().color(C::dim(ui)));
         ui.add_space(2.0);
-        ui.label(RichText::new(t.hint).color(C::dim(ui)));
-        ui.add_space(6.0);
+        w::text_with_code(ui, t.hint, C::dim(ui));
+        ui.add_space(w::sp::S);
         ui.horizontal(|ui| {
             let has = exists && t.stat.is_some_and(|s| s.size > 0);
             match t.kind {
                 Kind::Clean => {
-                    if w::big_button(ui, tr("Clean"), C::green(), has).clicked() {
+                    if w::tinted_button(ui, tr("Clean"), C::accent(), has).clicked() {
                         out = Some(CardAction::Clean);
                     }
                 }
                 Kind::Trash => {
-                    if w::big_button(ui, tr("Empty Trash…"), C::red(), has).clicked() {
+                    if w::tinted_button(ui, tr("Empty Trash…"), C::red(), has).clicked() {
                         out = Some(CardAction::EmptyTrash);
                     }
                 }
@@ -214,7 +244,7 @@ pub fn partial_note(g: &Gui, ui: &mut Ui) {
             tr("Partial results"),
             tr("The scan is waiting for a macOS permission dialog. Answer it, or give MacPilot Full Disk Access — the list will be completed."),
         );
-        ui.add_space(6.0);
+        ui.add_space(w::sp::S);
     }
 }
 
@@ -226,7 +256,7 @@ fn stale_banner(g: &mut Gui, ui: &mut Ui) {
         ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new(tr("Not used for a long time")).size(15.0).strong());
+                ui.label(RichText::new(tr("Not used for a long time")).headline());
                 if ready {
                     let total: u64 = g.stale.iter().map(|i| i.size).sum();
                     ui.label(trf(
@@ -238,7 +268,7 @@ fn stale_banner(g: &mut Gui, ui: &mut Ui) {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if w::big_button(ui, tr("Review"), C::accent(), true).clicked() {
+                if w::plain_button(ui, tr("Review")).clicked() {
                     open = true;
                 }
             });
@@ -278,7 +308,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
             g.refresh_junk();
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(w::sp::XS);
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
@@ -287,7 +317,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                     RichText::new(trf("{1}: {0}, {2} in total", &[&fmt::n(g.junk.len() as u64, fmt::Noun::BuildFolder), &root, &fmt::bytes(total)]))
                         .color(C::dim(ui)),
                 );
-                ui.label(RichText::new(trf("{0} in inactive projects", &[&fmt::bytes(old)])).size(24.0).strong().color(C::green()));
+                ui.label(RichText::new(trf("{0} in inactive projects", &[&fmt::bytes(old)])).metric().color(C::text(ui)));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let label = trf("Move {0} to Trash · {1}", &[&checked.len(), &fmt::bytes(checked_size)]);
@@ -311,11 +341,11 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
         });
         ui.label(
             RichText::new(tr("Build output and dependencies can always be recreated. What matters is when the project itself was last changed — builds of old projects are pure junk."))
-                .size(11.5)
+                .caption()
                 .color(C::dim(ui)),
         );
     });
-    ui.add_space(6.0);
+    ui.add_space(w::sp::S);
     if g.junk.is_empty() {
         w::empty(ui, tr("No build folders found."));
         return;
@@ -333,12 +363,12 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
         .header(24.0, |mut h| {
             for t in ["", tr("Project"), tr("Kind"), tr("Size"), tr("Project changed")] {
                 h.col(|ui| {
-                    ui.label(RichText::new(t).strong().color(C::dim(ui)));
+                    ui.label(RichText::new(t).semibold().color(C::dim(ui)));
                 });
             }
         })
         .body(|body| {
-            body.rows(34.0, g.junk.len(), |mut row| {
+            body.rows(44.0, g.junk.len(), |mut row| {
                 let j = &g.junk[row.index()];
                 row.col(|ui| {
                     let mut on = g.junk_checked.contains(&j.path);
@@ -351,8 +381,8 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         let name = j.project.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        ui.label(RichText::new(name).strong());
-                        ui.label(RichText::new(fmt::path(&j.path)).size(11.0).color(C::dim(ui)));
+                        ui.label(RichText::new(name).semibold());
+                        ui.label(RichText::new(fmt::path(&j.path)).caption().color(C::dim(ui)));
                     });
                 });
                 row.col(|ui| {

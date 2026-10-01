@@ -83,6 +83,14 @@ pub fn pct(v: f32) -> String {
     }
 }
 
+/// A whole percentage, spaced as the language wants: "42%", "42 %".
+pub fn pct0(v: f32) -> String {
+    match lang() {
+        Lang::En => format!("{v:.0}%"),
+        Lang::Fr | Lang::De | Lang::Ru | Lang::Es => format!("{v:.0}\u{00A0}%"),
+    }
+}
+
 /// Power: "2.4 W", "0.05 W", "2,4 Вт".
 pub fn watts(v: f32) -> String {
     let d = if v.abs() < 0.1 { 2 } else { 1 };

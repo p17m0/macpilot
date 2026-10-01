@@ -54,6 +54,14 @@ impl C {
     pub fn fg() -> Color32 {
         if dark_now() { Color32::WHITE } else { Color32::BLACK }
     }
+    /// What is cut out of a filled icon of color `c`: the background it sits on.
+    pub fn paper_on(c: Color32) -> Color32 {
+        if classic() {
+            return if c == Self::fg() { Self::paper() } else { Self::fg() };
+        }
+        // Selected icons are white on the accent: their cut-outs take the accent.
+        if c == Color32::WHITE { Self::accent() } else { Color32::WHITE }
+    }
     /// Paper of the Classic style.
     pub fn paper() -> Color32 {
         if dark_now() { Color32::BLACK } else { Color32::WHITE }
@@ -123,19 +131,134 @@ impl Level {
 /// The Classic pixel font (Pixelify Sans, SIL Open Font License — see assets/fonts).
 const PIXEL_FONT: &[u8] = include_bytes!("../../assets/fonts/PixelifySans.ttf");
 
+/// Type scale, after the macOS Human Interface Guidelines.
+pub mod ty {
+    /// Secondary lines: bundle ids, paths, labels under numbers.
+    pub const CAPTION: f32 = 11.0;
+    /// Small print that still has to be read: descriptions in cards.
+    pub const CALLOUT: f32 = 12.0;
+    pub const BODY: f32 = 13.0;
+    /// Card titles.
+    pub const HEADLINE: f32 = 15.0;
+    /// Section titles inside a page.
+    pub const SECTION: f32 = 17.0;
+    /// The name of the selected thing in a side panel.
+    pub const TITLE: f32 = 20.0;
+    /// Big numbers.
+    pub const METRIC: f32 = 26.0;
+    /// Page titles.
+    pub const LARGE_TITLE: f32 = 26.0;
+}
+
+/// Text in SF Pro Text Semibold (bold pixels in Classic).
+const SEMIBOLD: &str = "semibold";
+/// SF Pro Display Bold, for page titles.
+const DISPLAY_BOLD: &str = "display-bold";
+/// SF Pro Display Semibold, for titles and big numbers.
+const DISPLAY_SEMIBOLD: &str = "display-semibold";
+
+/// Text roles. egui's `strong()` only changes the color; these change the weight too.
+pub trait Txt {
+    fn semibold(self) -> Self;
+    fn caption(self) -> Self;
+    fn callout(self) -> Self;
+    fn headline(self) -> Self;
+    fn section(self) -> Self;
+    fn title(self) -> Self;
+    fn metric(self) -> Self;
+    fn large_title(self) -> Self;
+}
+
+impl Txt for RichText {
+    fn semibold(self) -> Self {
+        self.strong().family(FontFamily::Name(SEMIBOLD.into()))
+    }
+    fn caption(self) -> Self {
+        self.size(ty::CAPTION)
+    }
+    fn callout(self) -> Self {
+        self.size(ty::CALLOUT)
+    }
+    fn headline(self) -> Self {
+        self.semibold().size(ty::HEADLINE)
+    }
+    fn section(self) -> Self {
+        self.semibold().size(ty::SECTION)
+    }
+    fn title(self) -> Self {
+        self.strong().family(FontFamily::Name(DISPLAY_SEMIBOLD.into())).size(ty::TITLE)
+    }
+    fn metric(self) -> Self {
+        self.strong().family(FontFamily::Name(DISPLAY_SEMIBOLD.into())).size(ty::METRIC)
+    }
+    fn large_title(self) -> Self {
+        self.strong().family(FontFamily::Name(DISPLAY_BOLD.into())).size(ty::LARGE_TITLE)
+    }
+}
+
+pub fn semibold_font(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+}
+
+/// A system font read once and kept for the whole run: every weight below shares the same bytes.
+fn system_font(path: &str) -> Option<&'static [u8]> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Fonts = HashMap<String, Option<&'static [u8]>>;
+    static CACHE: OnceLock<Mutex<Fonts>> = OnceLock::new();
+    let mut c = CACHE.get_or_init(Default::default).lock().unwrap();
+    *c.entry(path.to_string()).or_insert_with(|| std::fs::read(path).ok().map(|b| &*Box::leak(b.into_boxed_slice())))
+}
+
+/// `bytes` at the given variation coordinates (`wght`, `opsz`…).
+fn variant(bytes: &'static [u8], coords: &[(&[u8; 4], f32)]) -> egui::FontData {
+    use egui::epaint::text::{FontTweak, VariationCoords};
+    let tweak = FontTweak { coords: VariationCoords::new(coords.iter().map(|(t, v)| (**t, *v))), ..Default::default() };
+    egui::FontData::from_static(bytes).tweak(tweak)
+}
+
 fn fonts(classic: bool) -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
-    // The macOS system font when available; the bundled font stays as a fallback for missing glyphs.
-    for (name, path) in [("sf", "/System/Library/Fonts/SFNS.ttf"), ("helvetica", "/System/Library/Fonts/Helvetica.ttc")] {
-        if let Ok(bytes) = std::fs::read(path) {
-            fonts.font_data.insert(name.into(), egui::FontData::from_owned(bytes).into());
-            fonts.families.entry(FontFamily::Proportional).or_default().insert(0, name.into());
-            break;
+    let fallback = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    // Family → the fonts to put in front of egui's own (which stay as a fallback for missing glyphs).
+    let mut front: Vec<(FontFamily, Vec<(String, egui::FontData)>)> = Vec::new();
+    let named = |n: &str| FontFamily::Name(n.into());
+    if let Some(sf) = system_font("/System/Library/Fonts/SFNS.ttf") {
+        // SF is one variable font: `opsz` picks Text (small sizes, open spacing) or Display (large, tight).
+        // Its default is Display, which is too tight for 13 pt.
+        front.push((FontFamily::Proportional, vec![("sf-text".into(), variant(sf, &[(b"wght", 400.0), (b"opsz", 17.0)]))]));
+        front.push((named(SEMIBOLD), vec![("sf-text-semibold".into(), variant(sf, &[(b"wght", 590.0), (b"opsz", 17.0)]))]));
+        front.push((named(DISPLAY_SEMIBOLD), vec![("sf-display-semibold".into(), variant(sf, &[(b"wght", 590.0), (b"opsz", 28.0)]))]));
+        front.push((named(DISPLAY_BOLD), vec![("sf-display-bold".into(), variant(sf, &[(b"wght", 700.0), (b"opsz", 28.0)]))]));
+    } else if let Some(h) = system_font("/System/Library/Fonts/Helvetica.ttc") {
+        for f in [FontFamily::Proportional, named(SEMIBOLD), named(DISPLAY_SEMIBOLD), named(DISPLAY_BOLD)] {
+            front.push((f, vec![("helvetica".into(), egui::FontData::from_static(h))]));
+        }
+    } else {
+        for f in [named(SEMIBOLD), named(DISPLAY_SEMIBOLD), named(DISPLAY_BOLD)] {
+            front.push((f, Vec::new()));
         }
     }
+    if let Some(mono) = system_font("/System/Library/Fonts/SFNSMono.ttf") {
+        // SF Mono defaults to its lightest weight.
+        front.push((FontFamily::Monospace, vec![("sf-mono".into(), variant(mono, &[(b"wght", 400.0)]))]));
+    }
     if classic {
-        fonts.font_data.insert("pixel".into(), egui::FontData::from_static(PIXEL_FONT).into());
-        fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "pixel".into());
+        for (family, list) in &mut front {
+            let w = match family {
+                FontFamily::Proportional => 400.0,
+                FontFamily::Monospace => continue,
+                _ => 700.0,
+            };
+            list.insert(0, (format!("pixel-{w}"), variant(PIXEL_FONT, &[(b"wght", w)])));
+        }
+    }
+    for (family, list) in front {
+        let names = fonts.families.entry(family).or_insert_with(|| fallback.clone());
+        for (i, (name, data)) in list.into_iter().enumerate() {
+            names.insert(i, name.clone());
+            fonts.font_data.insert(name, data.into());
+        }
     }
     fonts
 }
@@ -149,11 +272,11 @@ pub fn setup_style(ctx: &egui::Context, style: UiStyle) {
         // The pixel font looks right a little larger.
         let k = if classic { 1.08 } else { 1.0 };
         s.text_styles = [
-            (TextStyle::Small, FontId::proportional(11.0 * k)),
-            (TextStyle::Body, FontId::proportional(13.5 * k)),
-            (TextStyle::Button, FontId::proportional(13.5 * k)),
-            (TextStyle::Heading, FontId::proportional(22.0 * k)),
-            (TextStyle::Monospace, FontId::monospace(12.5)),
+            (TextStyle::Small, FontId::proportional(ty::CAPTION * k)),
+            (TextStyle::Body, FontId::proportional(ty::BODY * k)),
+            (TextStyle::Button, FontId::proportional(ty::BODY * k)),
+            (TextStyle::Heading, FontId::new(ty::LARGE_TITLE * k, FontFamily::Name(DISPLAY_BOLD.into()))),
+            (TextStyle::Monospace, FontId::monospace(12.0)),
         ]
         .into();
         s.spacing.item_spacing = Vec2::new(8.0, 6.0);
@@ -211,6 +334,8 @@ pub fn setup_style(ctx: &egui::Context, style: UiStyle) {
                     w.corner_radius = CornerRadius::same(6);
                 }
                 v.window_corner_radius = CornerRadius::same(12);
+                // Body text at full label contrast (egui's default is a mid grey, too faint in the dark theme).
+                v.widgets.noninteractive.fg_stroke.color = if dark { Color32::from_gray(225) } else { Color32::from_gray(30) };
             }
         });
     }
@@ -220,7 +345,7 @@ pub fn setup_style(ctx: &egui::Context, style: UiStyle) {
 const PAGE_MAX: f32 = 1180.0;
 
 pub fn page_frame(ui: &Ui) -> egui::Frame {
-    egui::Frame::new().fill(ui.visuals().panel_fill).inner_margin(egui::Margin { left: 18, right: 14, top: 14, bottom: 10 })
+    egui::Frame::new().fill(ui.visuals().panel_fill).inner_margin(egui::Margin { left: 24, right: 24, top: 20, bottom: 16 })
 }
 
 /// Lay out a page in a centered column of at most [`PAGE_MAX`] width.
@@ -233,13 +358,50 @@ pub fn centered<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 pub fn side_frame(ui: &Ui) -> egui::Frame {
     if classic() {
-        return egui::Frame::new().fill(C::paper()).inner_margin(egui::Margin::same(14)).stroke(Stroke::new(1.0, C::fg()));
+        return egui::Frame::new().fill(C::paper()).inner_margin(egui::Margin::same(16)).stroke(Stroke::new(1.0, C::fg()));
     }
-    egui::Frame::new().fill(ui.visuals().panel_fill).inner_margin(egui::Margin::same(14))
+    egui::Frame::new().fill(ui.visuals().panel_fill).inner_margin(egui::Margin::same(16))
+}
+
+/// Spacing scale: everything is a multiple of 4.
+pub mod sp {
+    pub const XS: f32 = 4.0;
+    pub const S: f32 = 8.0;
+    pub const M: f32 = 12.0;
+    pub const L: f32 = 16.0;
+    pub const XL: f32 = 24.0;
+    pub const XXL: f32 = 32.0;
+}
+
+/// The top of every page, always in the same place: the title, the page's sections (a segmented
+/// control) next to it, and the page's own actions on the right. A subtitle goes underneath.
+pub fn title_bar(ui: &mut Ui, title: &str, subtitle: &str, sections: impl FnOnce(&mut Ui), actions: impl FnOnce(&mut Ui)) {
+    if classic() {
+        title_text(ui, title);
+        ui.horizontal(|ui| {
+            sections(ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
+        });
+    } else {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(title).large_title());
+            ui.add_space(sp::M);
+            sections(ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
+        });
+    }
+    if !subtitle.is_empty() {
+        ui.label(RichText::new(subtitle).color(C::dim(ui)));
+    }
+    ui.add_space(sp::M);
 }
 
 /// Page title with an optional subtitle.
 pub fn header(ui: &mut Ui, title: &str, subtitle: &str) {
+    title_bar(ui, title, subtitle, |_| {}, |_| {});
+}
+
+fn title_text(ui: &mut Ui, title: &str) {
     if classic() {
         // The striped title bar of classic Mac windows, with the title in a white box.
         let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::hover());
@@ -248,17 +410,13 @@ pub fn header(ui: &mut Ui, title: &str, subtitle: &str) {
             let y = rect.top() + 6.0 + i as f32 * 3.5;
             p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0, C::fg()));
         }
-        let galley = p.layout_no_wrap(title.to_string(), FontId::proportional(22.0), C::fg());
+        let galley = p.layout_no_wrap(title.to_string(), FontId::new(ty::TITLE, FontFamily::Name(DISPLAY_BOLD.into())), C::fg());
         let bx = Rect::from_center_size(rect.center(), galley.size() + Vec2::new(24.0, 2.0));
         p.rect_filled(bx, 0, C::paper());
         p.galley(bx.center() - galley.size() / 2.0, galley, C::fg());
     } else {
-        ui.label(RichText::new(title).size(24.0).strong());
+        ui.label(RichText::new(title).large_title());
     }
-    if !subtitle.is_empty() {
-        ui.label(RichText::new(subtitle).color(C::dim(ui)));
-    }
-    ui.add_space(8.0);
 }
 
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -267,7 +425,7 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 /// A card: white (or dark) with a thin border, or a Classic box with a hard shadow.
 pub fn card_frame(ui: &Ui) -> egui::Frame {
-    let f = egui::Frame::new().fill(C::card(ui)).inner_margin(egui::Margin::same(14));
+    let f = egui::Frame::new().fill(C::card(ui)).inner_margin(egui::Margin::same(16));
     if classic() {
         f.stroke(Stroke::new(1.0, C::fg())).corner_radius(CornerRadius::ZERO).shadow(egui::epaint::Shadow {
             offset: [2, 2],
@@ -283,22 +441,22 @@ pub fn card_frame(ui: &Ui) -> egui::Frame {
 /// The sidebar.
 pub fn pane_frame(ui: &Ui) -> egui::Frame {
     if classic() {
-        return egui::Frame::new().fill(C::paper()).inner_margin(egui::Margin::symmetric(12, 14)).stroke(Stroke::new(1.0, C::fg()));
+        return egui::Frame::new().fill(C::paper()).inner_margin(egui::Margin::symmetric(12, 16)).stroke(Stroke::new(1.0, C::fg()));
     }
-    egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(12, 14))
+    egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(12, 16))
 }
 
 /// Colored hint box (warnings, explanations).
 pub fn note(ui: &mut Ui, color: Color32, title: &str, text: &str) {
     let frame = if classic() {
-        egui::Frame::new().fill(C::paper()).stroke(Stroke::new(1.0, C::fg())).inner_margin(egui::Margin::same(10))
+        egui::Frame::new().fill(C::paper()).stroke(Stroke::new(1.0, C::fg())).inner_margin(egui::Margin::same(12))
     } else {
-        egui::Frame::new().fill(color.gamma_multiply(0.12)).corner_radius(8).inner_margin(egui::Margin::same(10))
+        egui::Frame::new().fill(color.gamma_multiply(0.12)).corner_radius(8).inner_margin(egui::Margin::same(12))
     };
     frame.show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         if !title.is_empty() {
-            ui.label(RichText::new(title).strong().color(color));
+            ui.label(RichText::new(title).semibold().color(color));
         }
         if !text.is_empty() {
             ui.label(text);
@@ -318,74 +476,126 @@ pub enum Icon {
     Settings,
 }
 
-/// Simple vector icons (no icon font needed).
-pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
-    let s = Stroke::new(1.6, c);
-    let m = r.center();
+/// Sidebar icons, drawn on a 16-unit grid with one stroke weight (no icon font needed).
+/// `filled` is the selected variant, like the `.fill` symbols of macOS.
+pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32, filled: bool) {
+    use std::f32::consts::{PI, TAU};
     let u = r.width() / 16.0;
+    let s = Stroke::new(1.5 * u, c);
+    let m = r.center();
+    let at = |x: f32, y: f32| r.left_top() + Vec2::new(x * u, y * u);
+    let rect = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(at(x0, y0), at(x1, y1));
+    let boxed = |rr: Rect, radius: f32| {
+        if filled {
+            p.rect_filled(rr, radius * u, c);
+        } else {
+            p.rect_stroke(rr, radius * u, s, egui::StrokeKind::Middle);
+        }
+    };
+    let arc = |center: Pos2, radius: f32, from: f32, to: f32| -> Vec<Pos2> {
+        (0..=24).map(|i| center + Vec2::angled(from + (to - from) * i as f32 / 24.0) * radius).collect()
+    };
     match icon {
         Icon::Overview => {
-            for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-                let cc = m + Vec2::new(dx * 3.6 * u, dy * 3.6 * u);
-                p.rect_stroke(Rect::from_center_size(cc, Vec2::splat(5.6 * u)), 1.5 * u, s, egui::StrokeKind::Middle);
+            // A gauge, like the app icon: an open arc with a needle.
+            let c0 = at(8.0, 9.5);
+            if filled {
+                p.circle_filled(c0, 7.0 * u, c);
+                p.add(egui::Shape::line(arc(c0, 4.6 * u, PI * 0.75, PI * 2.25), Stroke::new(1.5 * u, C::paper_on(c))));
+                p.line_segment([c0, c0 + Vec2::angled(-PI * 0.25) * 4.0 * u], Stroke::new(1.6 * u, C::paper_on(c)));
+            } else {
+                p.add(egui::Shape::line(arc(c0, 6.5 * u, PI * 0.75, PI * 2.25), s));
+                p.line_segment([c0, c0 + Vec2::angled(-PI * 0.25) * 4.2 * u], s);
+                p.circle_filled(c0, 1.4 * u, c);
             }
         }
         Icon::Procs => {
-            for (i, h) in [5.0, 9.0, 12.0, 7.0].iter().enumerate() {
-                let x = r.left() + (2.5 + i as f32 * 3.6) * u;
-                p.line_segment([Pos2::new(x, r.bottom() - 2.0 * u), Pos2::new(x, r.bottom() - (2.0 + h) * u)], Stroke::new(2.2 * u, c));
+            // Activity bars.
+            for (i, h) in [6.0, 10.0, 13.0, 8.0].iter().enumerate() {
+                let x = 2.5 + i as f32 * 3.4;
+                let bar = rect(x, 14.5 - h, x + 2.2, 14.5);
+                if filled || i == 2 {
+                    p.rect_filled(bar, 0.8 * u, c);
+                } else {
+                    p.rect_stroke(bar, 0.8 * u, Stroke::new(1.2 * u, c), egui::StrokeKind::Inside);
+                }
             }
         }
         Icon::Battery => {
-            let body = Rect::from_center_size(m - Vec2::new(0.8 * u, 0.0), Vec2::new(12.0 * u, 7.0 * u));
-            p.rect_stroke(body, 1.8 * u, s, egui::StrokeKind::Middle);
-            let nub = Rect::from_center_size(Pos2::new(body.right() + 1.3 * u, m.y), Vec2::new(1.4 * u, 3.0 * u));
-            p.rect_filled(nub, 0.6 * u, c);
-            let fill = Rect::from_min_max(body.min + Vec2::splat(1.9 * u), Pos2::new(body.left() + 7.0 * u, body.bottom() - 1.9 * u));
-            p.rect_filled(fill, 0.8 * u, c);
+            let body = rect(1.0, 4.5, 13.5, 11.5);
+            boxed(body, 2.2);
+            p.rect_filled(rect(14.3, 6.6, 15.4, 9.4), 0.5 * u, c);
+            let level = rect(2.8, 6.3, 8.6, 9.7);
+            p.rect_filled(level, 0.8 * u, if filled { C::paper_on(c) } else { c });
         }
         Icon::Disk => {
-            p.circle_stroke(m, 6.5 * u, s);
-            p.circle_filled(m, 1.6 * u, c);
-            p.line_segment([m, m + Vec2::new(4.6 * u, -4.6 * u)], s);
+            // A drive, as in Finder's sidebar.
+            let body = rect(1.0, 4.0, 15.0, 12.0);
+            boxed(body, 2.0);
+            let ink = if filled { C::paper_on(c) } else { c };
+            p.line_segment([at(1.8, 9.0), at(14.2, 9.0)], Stroke::new(1.2 * u, ink));
+            p.circle_filled(at(12.3, 10.6), 0.9 * u, ink);
         }
         Icon::Clean => {
-            // A sparkle.
-            let a = 6.5 * u;
-            let b = 1.8 * u;
-            let pts = [
-                m + Vec2::new(0.0, -a),
-                m + Vec2::new(b, -b),
-                m + Vec2::new(a, 0.0),
-                m + Vec2::new(b, b),
-                m + Vec2::new(0.0, a),
-                m + Vec2::new(-b, b),
-                m + Vec2::new(-a, 0.0),
-                m + Vec2::new(-b, -b),
-            ];
-            p.add(egui::Shape::closed_line(pts.to_vec(), s));
+            // A sparkle, and a small one.
+            let star = |c0: Pos2, a: f32, b: f32| {
+                vec![
+                    c0 + Vec2::new(0.0, -a),
+                    c0 + Vec2::new(b, -b),
+                    c0 + Vec2::new(a, 0.0),
+                    c0 + Vec2::new(b, b),
+                    c0 + Vec2::new(0.0, a),
+                    c0 + Vec2::new(-b, b),
+                    c0 + Vec2::new(-a, 0.0),
+                    c0 + Vec2::new(-b, -b),
+                ]
+            };
+            let big = star(at(7.0, 9.0), 6.2 * u, 1.6 * u);
+            if filled {
+                // Not convex: fill it as four triangles around the middle.
+                let c0 = at(7.0, 9.0);
+                for i in 0..8 {
+                    p.add(egui::Shape::convex_polygon(vec![c0, big[i], big[(i + 1) % 8]], c, Stroke::NONE));
+                }
+            } else {
+                p.add(egui::Shape::closed_line(big, s));
+            }
+            let small = star(at(13.0, 3.5), 2.6 * u, 0.8 * u);
+            let c1 = at(13.0, 3.5);
+            for i in 0..8 {
+                p.add(egui::Shape::convex_polygon(vec![c1, small[i], small[(i + 1) % 8]], c, Stroke::NONE));
+            }
         }
         Icon::Apps => {
-            p.rect_stroke(Rect::from_center_size(m, Vec2::splat(12.0 * u)), 3.0 * u, s, egui::StrokeKind::Middle);
-            p.circle_filled(m, 2.2 * u, c);
+            // Four app tiles.
+            for (x, y) in [(1.5, 1.5), (9.0, 1.5), (1.5, 9.0), (9.0, 9.0)] {
+                boxed(rect(x, y, x + 5.5, y + 5.5), 1.6);
+            }
         }
         Icon::Startup => {
-            let rr = 5.8 * u;
-            let pts: Vec<Pos2> = (0..=24)
-                .map(|i| {
-                    let t = -std::f32::consts::FRAC_PI_2 + 0.6 + i as f32 / 24.0 * (std::f32::consts::TAU - 1.2);
-                    m + Vec2::new(t.cos() * rr, t.sin() * rr)
-                })
-                .collect();
-            p.add(egui::Shape::line(pts, s));
-            p.line_segment([m + Vec2::new(0.0, -7.2 * u), m + Vec2::new(0.0, -1.5 * u)], s);
+            let c0 = at(8.0, 8.8);
+            if filled {
+                p.circle_filled(c0, 7.2 * u, c);
+                let ink = Stroke::new(1.6 * u, C::paper_on(c));
+                p.add(egui::Shape::line(arc(c0, 4.0 * u, -PI / 2.0 + 0.7, -PI / 2.0 + TAU - 0.7), ink));
+                p.line_segment([c0 - Vec2::new(0.0, 5.0 * u), c0 - Vec2::new(0.0, 1.0 * u)], ink);
+            } else {
+                p.add(egui::Shape::line(arc(c0, 6.0 * u, -PI / 2.0 + 0.6, -PI / 2.0 + TAU - 0.6), s));
+                p.line_segment([at(8.0, 1.0), at(8.0, 8.0)], s);
+            }
         }
         Icon::Settings => {
-            p.circle_stroke(m, 3.0 * u, s);
+            // A gear: eight teeth around a ring.
             for i in 0..8 {
-                let t = i as f32 / 8.0 * std::f32::consts::TAU;
-                let d = Vec2::new(t.cos(), t.sin());
-                p.line_segment([m + d * 4.8 * u, m + d * 7.0 * u], Stroke::new(2.0 * u, c));
+                let d = Vec2::angled(i as f32 / 8.0 * TAU);
+                p.line_segment([m + d * 4.6 * u, m + d * 7.0 * u], Stroke::new(2.4 * u, c));
+            }
+            if filled {
+                p.circle_filled(m, 5.4 * u, c);
+                p.circle_filled(m, 2.0 * u, C::paper_on(c));
+            } else {
+                p.circle_stroke(m, 4.6 * u, s);
+                p.circle_stroke(m, 1.8 * u, Stroke::new(1.2 * u, c));
             }
         }
     }
@@ -403,16 +613,22 @@ pub fn nav_item(ui: &mut Ui, selected: bool, icon: Icon, label: &str, badge: Opt
     }
     let fg = if selected { on_sel } else { C::text(ui) };
     let ir = Rect::from_center_size(Pos2::new(rect.left() + 20.0, rect.center().y), Vec2::splat(18.0));
-    paint_icon(p, ir, icon, if selected { on_sel } else { C::accent() });
-    p.text(Pos2::new(rect.left() + 38.0, rect.center().y), egui::Align2::LEFT_CENTER, label, FontId::proportional(14.0), fg);
+    paint_icon(p, ir, icon, if selected { on_sel } else { C::accent() }, selected);
+    p.text(
+        Pos2::new(rect.left() + 38.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        if selected { semibold_font(ty::BODY) } else { FontId::proportional(ty::BODY) },
+        fg,
+    );
     if let Some(n) = badge {
         let br = Rect::from_center_size(Pos2::new(rect.right() - 16.0, rect.center().y), Vec2::new(22.0, 18.0));
         if classic() {
             p.rect_filled(br, 0, if selected { C::paper() } else { C::fg() });
-            p.text(br.center(), egui::Align2::CENTER_CENTER, n.to_string(), FontId::proportional(11.0), if selected { C::fg() } else { C::paper() });
+            p.text(br.center(), egui::Align2::CENTER_CENTER, n.to_string(), semibold_font(ty::CAPTION), if selected { C::fg() } else { C::paper() });
         } else {
             p.rect_filled(br, 9, C::red());
-            p.text(br.center(), egui::Align2::CENTER_CENTER, n.to_string(), FontId::proportional(11.0), Color32::WHITE);
+            p.text(br.center(), egui::Align2::CENTER_CENTER, n.to_string(), semibold_font(ty::CAPTION), Color32::WHITE);
         }
     }
     // Painted by hand, so tell VoiceOver what it is.
@@ -537,14 +753,20 @@ pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> egui::Response {
     resp
 }
 
+/// Fill of a meter: the accent while all is well, yellow and red only when something needs attention.
 pub fn ratio_color(r: f32) -> Color32 {
     if r >= 0.9 {
         C::red()
     } else if r >= 0.75 {
         C::yellow()
     } else {
-        C::green()
+        C::accent()
     }
+}
+
+/// Color of a measured value: plain text while all is well (color is kept for what needs attention).
+pub fn value_color(ui: &Ui, r: f32) -> Color32 {
+    if r >= 0.75 { ratio_color(r) } else { C::text(ui) }
 }
 
 /// Meter in the sidebar: title, value, and a sparkline or a bar.
@@ -553,6 +775,7 @@ pub fn side_meter(ui: &mut Ui, title: &str, value: &str, ratio: f32, hist: Optio
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, format!("{title}: {value}")));
     let color = ratio_color(ratio);
+    let value_color = value_color(ui, ratio);
     let p = ui.painter();
     if classic() {
         p.rect_filled(rect, 0, C::paper());
@@ -560,8 +783,8 @@ pub fn side_meter(ui: &mut Ui, title: &str, value: &str, ratio: f32, hist: Optio
     } else {
         p.rect_filled(rect, 8, C::card(ui));
     }
-    p.text(rect.left_top() + Vec2::new(10.0, 6.0), egui::Align2::LEFT_TOP, title, FontId::proportional(10.5), C::dim(ui));
-    p.text(rect.left_top() + Vec2::new(10.0, 20.0), egui::Align2::LEFT_TOP, value, FontId::proportional(13.0), color);
+    p.text(rect.left_top() + Vec2::new(10.0, 6.0), egui::Align2::LEFT_TOP, title, FontId::proportional(ty::CAPTION), C::dim(ui));
+    p.text(rect.left_top() + Vec2::new(10.0, 20.0), egui::Align2::LEFT_TOP, value, semibold_font(ty::BODY), value_color);
     match hist {
         Some(h) => {
             let r = Rect::from_min_size(Pos2::new(rect.right() - 62.0, rect.top() + 8.0), Vec2::new(52.0, 28.0));
@@ -575,11 +798,13 @@ pub fn side_meter(ui: &mut Ui, title: &str, value: &str, ratio: f32, hist: Optio
             p.rect_filled(f, 2, color);
         }
     }
-    ui.add_space(4.0);
+    ui.add_space(sp::XS);
 }
 
 pub fn paint_sparkline(ui: &Ui, h: &VecDeque<f32>, rect: Rect, color: Color32) {
     let p = ui.painter();
+    // The baseline spans the whole width from the start, so a short history does not look cut off.
+    p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, color.gamma_multiply(0.35)));
     if h.len() < 2 {
         return;
     }
@@ -643,7 +868,7 @@ pub fn bar(ui: &mut Ui, ratio: f32, size: Vec2, color: Color32) -> egui::Respons
 }
 
 pub fn badge(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
-    let galley = ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(11.0), color);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), semibold_font(ty::CAPTION), color);
     let size = galley.size() + Vec2::new(12.0, 4.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     resp.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, text));
@@ -694,9 +919,9 @@ pub fn cpu_color(ui: &Ui, c: f32) -> Color32 {
 }
 
 pub fn mem_color(ui: &Ui, m: u64) -> Color32 {
-    if m >= 2_000_000_000 {
+    if m >= 4_000_000_000 {
         C::red()
-    } else if m >= 500_000_000 {
+    } else if m >= 1_500_000_000 {
         C::yellow()
     } else if m >= 30_000_000 {
         C::text(ui)
@@ -705,10 +930,9 @@ pub fn mem_color(ui: &Ui, m: u64) -> Color32 {
     }
 }
 
+/// Sizes are information, not alarms: only 10 GB and more stand out.
 pub fn size_color(ui: &Ui, s: u64) -> Color32 {
     if s >= 10_000_000_000 {
-        C::red()
-    } else if s >= 1_000_000_000 {
         C::yellow()
     } else if s >= 100_000_000 {
         C::text(ui)
@@ -743,6 +967,23 @@ pub fn time_cell(ui: &mut Ui, ts: Option<i64>) {
     }
 }
 
+/// Wrapped text where `commands` in backticks are set in SF Mono on a faint background, as in docs.
+pub fn text_with_code(ui: &mut Ui, text: &str, color: Color32) {
+    use egui::text::{LayoutJob, TextFormat};
+    let mut job = LayoutJob::default();
+    let body = ui.style().text_styles[&TextStyle::Body].clone();
+    for (i, part) in text.split('`').enumerate() {
+        let format = if i % 2 == 1 {
+            TextFormat { font_id: FontId::monospace(body.size - 1.0), color: C::text(ui), background: C::track(ui), ..Default::default() }
+        } else {
+            TextFormat { font_id: body.clone(), color, ..Default::default() }
+        };
+        job.append(part, 0.0, format);
+    }
+    job.wrap.max_width = ui.available_width();
+    ui.label(job);
+}
+
 /// Label–value row in a details card.
 pub fn kv(ui: &mut Ui, k: &str, v: impl Into<String>) {
     ui.horizontal_wrapped(|ui| {
@@ -768,9 +1009,23 @@ pub fn button_radius() -> u8 {
 
 pub fn big_button(ui: &mut Ui, text: &str, color: Color32, enabled: bool) -> egui::Response {
     let b = if classic() {
-        egui::Button::new(RichText::new(text).strong().color(C::paper())).fill(C::fg()).corner_radius(6).stroke(Stroke::new(2.0, C::fg()))
+        egui::Button::new(RichText::new(text).semibold().color(C::paper())).fill(C::fg()).corner_radius(6).stroke(Stroke::new(2.0, C::fg()))
     } else {
-        egui::Button::new(RichText::new(text).strong().color(Color32::WHITE)).fill(color).corner_radius(8)
+        egui::Button::new(RichText::new(text).semibold().color(Color32::WHITE)).fill(color).corner_radius(8)
+    };
+    ui.add_enabled(enabled, b.min_size(Vec2::new(0.0, 32.0)))
+}
+
+/// An action repeated on many cards: tinted with `color` instead of filled, so one screen
+/// does not shout with a dozen bright buttons. A plain bordered button in Classic.
+pub fn tinted_button(ui: &mut Ui, text: &str, color: Color32, enabled: bool) -> egui::Response {
+    let b = if classic() {
+        egui::Button::new(RichText::new(text).semibold()).corner_radius(button_radius())
+    } else {
+        egui::Button::new(RichText::new(text).semibold().color(color))
+            .fill(color.gamma_multiply(0.14))
+            .stroke(Stroke::NONE)
+            .corner_radius(button_radius())
     };
     ui.add_enabled(enabled, b.min_size(Vec2::new(0.0, 32.0)))
 }
@@ -781,16 +1036,62 @@ pub fn plain_button(ui: &mut Ui, text: &str) -> egui::Response {
 
 /// Checkbox header row helper: "select all / none".
 pub fn waiting(ui: &mut Ui, text: &str) {
-    ui.add_space(30.0);
+    ui.add_space(sp::XXL);
     ui.vertical_centered(|ui| {
         ui.spinner();
         ui.label(RichText::new(text).color(C::dim(ui)));
     });
 }
 
+/// A small pixel-art computer with a smile, for empty and "all clean" states — a nod to the
+/// first Macintosh, drawn on a 16×16 grid. `#` is ink, `+` a lighter tint, `.` the screen.
+const PIXEL_FRIEND: [&str; 16] = [
+    "  ############  ",
+    " #++++++++++++# ",
+    " #+##########+# ",
+    " #+#........#+# ",
+    " #+#..#..#..#+# ",
+    " #+#..#..#..#+# ",
+    " #+#........#+# ",
+    " #+#.#....#.#+# ",
+    " #+#..####..#+# ",
+    " #+#........#+# ",
+    " #+##########+# ",
+    " #++++++++++++# ",
+    " #+++++++###++# ",
+    " #++++++++++++# ",
+    "  ############  ",
+    "   ##########   ",
+];
+
+pub fn pixel_friend(ui: &mut Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let px = size / 16.0;
+    let (ink, tint, screen) =
+        if classic() { (C::fg(), C::paper(), C::paper()) } else { (C::accent(), C::accent().gamma_multiply(0.18), C::card(ui)) };
+    let p = ui.painter();
+    for (y, row) in PIXEL_FRIEND.iter().enumerate() {
+        for (x, ch) in row.chars().enumerate() {
+            let color = match ch {
+                '#' => ink,
+                '+' => tint,
+                '.' => screen,
+                _ => continue,
+            };
+            let r = Rect::from_min_size(rect.min + Vec2::new(x as f32 * px, y as f32 * px), Vec2::splat(px));
+            // Whole pixels, no anti-aliased seams between them.
+            p.rect_filled(r.expand(0.25), 0, color);
+        }
+    }
+}
+
 pub fn empty(ui: &mut Ui, text: &str) {
-    ui.add_space(30.0);
-    ui.vertical_centered(|ui| ui.label(RichText::new(text).size(15.0).color(C::dim(ui))));
+    ui.add_space(sp::XXL);
+    ui.vertical_centered(|ui| {
+        pixel_friend(ui, 64.0);
+        ui.add_space(sp::M);
+        ui.label(RichText::new(text).size(ty::HEADLINE).color(C::dim(ui)));
+    });
 }
 
 pub fn yes_word() -> &'static str {

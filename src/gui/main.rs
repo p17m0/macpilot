@@ -31,7 +31,7 @@ use macpilot::settings::{Settings, Theme};
 use macpilot::startup::StartupItem;
 use macpilot::{fmt, tr, trf};
 
-use widgets::{C, Level};
+use widgets::{self as w, C, Level, Txt};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
@@ -977,12 +977,18 @@ impl Gui {
             p.rect_filled(rect, 0, Color32::from_black_alpha(150));
             let inner = rect.shrink(24.0);
             p.rect_stroke(inner, 16, egui::Stroke::new(3.0, widgets::C::accent()), egui::StrokeKind::Inside);
-            p.text(inner.center(), egui::Align2::CENTER_CENTER, tr("Drop an app to uninstall it"), egui::FontId::proportional(26.0), Color32::WHITE);
+            p.text(
+                inner.center(),
+                egui::Align2::CENTER_CENTER,
+                tr("Drop an app to uninstall it"),
+                w::semibold_font(w::ty::LARGE_TITLE),
+                Color32::WHITE,
+            );
             p.text(
                 inner.center() + egui::vec2(0.0, 36.0),
                 egui::Align2::CENTER_CENTER,
                 tr("or a file or folder to see it on the disk"),
-                egui::FontId::proportional(15.0),
+                egui::FontId::proportional(w::ty::HEADLINE),
                 Color32::from_gray(220),
             );
         }
@@ -1441,9 +1447,9 @@ impl eframe::App for Gui {
 
         egui::Panel::bottom("status")
             .frame(if widgets::classic() {
-                egui::Frame::new().fill(C::paper()).stroke(egui::Stroke::new(1.0, C::fg())).inner_margin(egui::Margin::symmetric(14, 6))
+                egui::Frame::new().fill(C::paper()).stroke(egui::Stroke::new(1.0, C::fg())).inner_margin(egui::Margin::symmetric(24, 8))
             } else {
-                egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(14, 6))
+                egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(24, 8))
             })
             .show(ui, |ui| self.status_bar(ui));
 
@@ -1483,9 +1489,9 @@ impl Gui {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             widgets::app_logo(ui, 26.0);
-            ui.label(RichText::new("MacPilot").size(18.0).strong());
+            ui.label(RichText::new("MacPilot").section());
         });
-        ui.add_space(16.0);
+        ui.add_space(w::sp::L);
         for (p, icon, label) in self.nav_items() {
             let badge = match p {
                 Page::Startup => self.startup.as_ref().map(|s| s.iter().filter(|i| i.unwanted && !i.disabled).count()).filter(|n| *n > 0),
@@ -1509,7 +1515,7 @@ impl Gui {
             }
             let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
             widgets::side_meter(ui, tr("Memory"), &format!("{} / {}", fmt::bytes(s.mem_used), fmt::bytes(s.mem_total)), mem_r, Some(&self.mem_hist));
-            widgets::side_meter(ui, "CPU", &format!("{:.0}%", s.cpu_total), s.cpu_total / 100.0, Some(&self.cpu_hist));
+            widgets::side_meter(ui, "CPU", &fmt::pct0(s.cpu_total), s.cpu_total / 100.0, Some(&self.cpu_hist));
         });
     }
 
@@ -1561,21 +1567,21 @@ impl Gui {
         let mut decision: Option<bool> = None;
         let resp = egui::Modal::new(egui::Id::new("confirm")).show(ctx, |ui| {
             ui.set_width(540.0);
-            ui.add_space(4.0);
+            ui.add_space(w::sp::XS);
             let title_color = if c.danger { C::red() } else { C::accent() };
-            ui.label(RichText::new(&c.title).size(18.0).strong().color(title_color));
-            ui.add_space(8.0);
+            ui.label(RichText::new(&c.title).section().color(title_color));
+            ui.add_space(w::sp::S);
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 for (s, l) in &c.lines {
                     ui.label(RichText::new(s).color(l.color(ui)));
                 }
             });
-            ui.add_space(10.0);
+            ui.add_space(w::sp::M);
             let ok_enabled = match c.require {
                 Some(word) => {
                     ui.horizontal(|ui| {
                         ui.label(tr("To confirm, type"));
-                        ui.label(RichText::new(word).strong().color(C::red()));
+                        ui.label(RichText::new(word).semibold().color(C::red()));
                     });
                     let r = ui.add(egui::TextEdit::singleline(&mut c.input).hint_text(word).desired_width(200.0));
                     r.request_focus();
@@ -1583,11 +1589,12 @@ impl Gui {
                 }
                 None => true,
             };
-            ui.add_space(12.0);
+            ui.add_space(w::sp::M);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let fill = if c.danger { C::red() } else { C::accent() };
-                    let btn = egui::Button::new(RichText::new(&c.button).strong().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(120.0, 30.0));
+                    let btn =
+                        egui::Button::new(RichText::new(&c.button).semibold().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(120.0, 30.0));
                     if ui.add_enabled(ok_enabled, btn).clicked() {
                         decision = Some(true);
                     }

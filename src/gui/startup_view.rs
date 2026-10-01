@@ -5,7 +5,8 @@ use egui_extras::{Column, TableBuilder};
 use macpilot::startup::{Scope, StartupItem};
 use macpilot::{fmt, tr, trf};
 
-use crate::widgets::{self as w, C, Level};
+use crate::icons;
+use crate::widgets::{self as w, C, Level, Txt};
 use crate::{Action, Confirm, Gui};
 
 fn scope_text(s: Scope) -> &'static str {
@@ -16,22 +17,47 @@ fn scope_text(s: Scope) -> &'static str {
     }
 }
 
+/// A name for people: "MacKeeper — Reminder" instead of "com.mackeeper.MacKeeper-Reminder".
+fn display_name(it: &StartupItem) -> String {
+    let last = it.label.rsplit('.').next().unwrap_or(&it.label);
+    let vendor = it.vendor.trim();
+    if vendor.is_empty() {
+        return last.to_string();
+    }
+    // Drop the vendor's name when the label repeats it ("MacKeeper-Reminder" → "Reminder").
+    let squash = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    let v = squash(vendor);
+    let mut rest = last;
+    if squash(last).starts_with(&v) {
+        let mut seen = 0;
+        let cut = last.char_indices().find(|(_, c)| {
+            if c.is_alphanumeric() {
+                seen += 1;
+            }
+            seen > v.chars().count()
+        });
+        rest = cut.map(|(i, _)| &last[i..]).unwrap_or("").trim_start_matches(|c: char| !c.is_alphanumeric());
+    }
+    if rest.is_empty() || squash(rest) == v { vendor.to_string() } else { format!("{vendor} — {rest}") }
+}
+
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("Startup")).size(24.0).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        w::title_bar(
+            ui,
+            tr("Startup"),
+            tr("Programs that start by themselves with your Mac. Turning one off is reversible — nothing is deleted."),
+            |_| {},
+            |ui| {
                 if w::plain_button(ui, tr("Login Items settings…")).on_hover_text(tr("Apps set to “Open at Login” are managed by macOS in System Settings.")).clicked() {
                     macpilot::startup::open_login_items_settings();
                 }
                 if w::plain_button(ui, tr("⟳ Refresh")).clicked() {
                     g.reload_startup();
                 }
-            });
-        });
-        ui.label(RichText::new(tr("Programs that start by themselves with your Mac. Turning one off is reversible — nothing is deleted.")).color(C::dim(ui)));
-        ui.add_space(8.0);
+            },
+        );
         let Some(items) = g.startup.clone() else {
             w::waiting(ui, tr("Reading startup items…"));
             return;
@@ -39,7 +65,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         let unwanted = items.iter().filter(|i| i.unwanted && !i.disabled).count();
         if unwanted > 0 {
             w::note(ui, C::red(), &trf("{0} unwanted item(s) found", &[&unwanted]), tr("MacKeeper and similar “cleaners” are known for nagging and fake alerts. Turn them off here and uninstall the app on the Apps page."));
-            ui.add_space(6.0);
+            ui.add_space(w::sp::S);
         }
         if items.is_empty() {
             w::empty(ui, tr("No startup items."));
@@ -54,18 +80,17 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::exact(52.0))
             .column(Column::remainder().at_least(260.0).clip(true))
-            .column(Column::exact(150.0))
-            .column(Column::exact(150.0))
-            .column(Column::exact(120.0))
+            .column(Column::exact(170.0))
+            .column(Column::exact(130.0))
             .header(24.0, |mut h| {
-                for t in [tr("On"), tr("Item"), tr("Vendor"), tr("Starts for"), tr("Status")] {
+                for t in [tr("On"), tr("Item"), tr("Starts for"), tr("Status")] {
                     h.col(|ui| {
-                        ui.label(RichText::new(t).strong().color(C::dim(ui)));
+                        ui.label(RichText::new(t).semibold().color(C::dim(ui)));
                     });
                 }
             })
             .body(|body| {
-                body.rows(40.0, items.len(), |mut row| {
+                body.rows(44.0, items.len(), |mut row| {
                     let it = &items[row.index()];
                     row.col(|ui| {
                         let mut on = !it.disabled;
@@ -74,10 +99,13 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         }
                     });
                     row.col(|ui| {
+                        let app = (!it.program.is_empty()).then(|| macpilot::procs::outer_app(std::path::Path::new(&it.program))).flatten();
+                        icons::process(ui, app.as_deref(), 24.0);
+                        let prog = if it.program.is_empty() { fmt::path(&it.path) } else { it.program.clone() };
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(&it.label).strong());
+                                ui.label(RichText::new(display_name(it)).semibold());
                                 if it.unwanted {
                                     w::badge(ui, tr("unwanted"), C::red());
                                 }
@@ -85,12 +113,9 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                                     w::badge(ui, tr("broken"), C::yellow());
                                 }
                             });
-                            let prog = if it.program.is_empty() { fmt::path(&it.path) } else { it.program.clone() };
-                            ui.label(RichText::new(prog).size(11.0).color(C::dim(ui)));
+                            // The identifier for those who need it; the full program path on hover.
+                            ui.add(egui::Label::new(RichText::new(&it.label).caption().color(C::dim(ui))).truncate()).on_hover_text(prog);
                         });
-                    });
-                    row.col(|ui| {
-                        ui.label(&it.vendor);
                     });
                     row.col(|ui| {
                         ui.label(RichText::new(scope_text(it.scope)).color(C::dim(ui)));
