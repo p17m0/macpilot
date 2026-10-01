@@ -54,9 +54,18 @@ jobs:
       - name: Build, sign, notarize and package
         run: scripts/release.sh "$GITHUB_REF_NAME"
 
+      - name: Release notes
+        # A short description from docs/release-notes/<tag>.md, or the generated list of changes.
+        run: |
+          if [ -f "docs/release-notes/${GITHUB_REF_NAME}.md" ]; then
+            cp "docs/release-notes/${GITHUB_REF_NAME}.md" dist/notes.md
+            echo "NOTES=dist/notes.md" >> "$GITHUB_ENV"
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: ${{ env.NOTES }}
+          generate_release_notes: ${{ env.NOTES == '' }}
           files: |
             dist/*.dmg
             dist/*.zip
