@@ -24,19 +24,27 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 <table>
   <tr>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/disk_map_dark.png"><img src="docs/screenshots/disk_map_light.png" alt="Disk map — what takes space"></picture></td>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/clean_dark.png"><img src="docs/screenshots/clean_light.png" alt="Cleanup — caches, logs, dev junk"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/battery_dark.png"><img src="docs/screenshots/battery_light.png" alt="Battery — health, history, energy use"></picture></td>
   </tr>
   <tr>
     <td align="center"><sub>Disk map — what takes space</sub></td>
-    <td align="center"><sub>Cleanup — caches, logs, dev junk</sub></td>
+    <td align="center"><sub>Battery — health, history, energy use</sub></td>
   </tr>
   <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/clean_dark.png"><img src="docs/screenshots/clean_light.png" alt="Cleanup — caches, logs, dev junk"></picture></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/procs_dark.png"><img src="docs/screenshots/procs_light.png" alt="Processes grouped by app"></picture></td>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps_dark.png"><img src="docs/screenshots/apps_light.png" alt="Apps — size, last use, full uninstall"></picture></td>
   </tr>
   <tr>
+    <td align="center"><sub>Cleanup — caches, logs, dev junk</sub></td>
     <td align="center"><sub>Processes grouped by app</sub></td>
+  </tr>
+  <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps_dark.png"><img src="docs/screenshots/apps_light.png" alt="Apps — size, last use, full uninstall"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/privacy_dark.png"><img src="docs/screenshots/privacy_light.png" alt="Privacy — folders MacPilot never opens"></picture></td>
+  </tr>
+  <tr>
     <td align="center"><sub>Apps — size, last use, full uninstall</sub></td>
+    <td align="center"><sub>Privacy — folders MacPilot never opens</sub></td>
   </tr>
 </table>
 
@@ -60,7 +68,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 - **System junk**: app caches, logs, Xcode data, iOS updates, Mail downloads, package-manager caches (npm, pnpm, Yarn, Cargo, Gradle, Homebrew…). You can also empty the Trash from here.
 - **Developer junk**: `node_modules`, `target`, `build`, `.venv`, `Pods`, DerivedData and more, in every project. It shows when each *project itself* was last changed, so builds of old projects are easy to spot.
 
-**Apps.** Uninstall apps together with the files they leave in `~/Library`, like AppCleaner. It also finds data left behind by apps you already removed. Folders that may contain your documents are marked and never pre-selected.
+**Apps.** Uninstall apps together with the files they leave in `~/Library`, like AppCleaner. It also finds what apps you already removed left behind — in Application Support, Caches, Containers, Preferences, Logs, WebKit, cookies and more, by bundle id and by the app's name — grouped per app. Apple's data, installed apps' helpers and shared updaters are never listed; containers that may hold your documents are marked.
 
 **Startup.** All launch agents and daemons: what each one runs, who made it, and whether it is running. Turn items off reversibly (`launchctl disable`). Known adware and broken leftovers are flagged.
 
@@ -100,7 +108,7 @@ MacPilot is built to be hard to misuse:
 
 1. Get `MacPilot-<version>.dmg` from [Releases](../../releases). It works on Apple Silicon and Intel, macOS 12 or later.
 2. Open it and drag **MacPilot** to **Applications**.
-3. If the release was built without a Developer ID (see [docs/RELEASING.md](docs/RELEASING.md)), macOS warns about an unidentified developer. Open the app the first time with **right-click → Open**, or run:
+3. Releases are not notarized yet, so the first launch shows **“MacPilot” Not Opened**. Click **Done**, then open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (on macOS 14 and earlier, **right-click → Open** works too). Or run once:
    ```bash
    xattr -dr com.apple.quarantine /Applications/MacPilot.app
    ```
@@ -126,6 +134,8 @@ cd macpilot
 This installs `MacPilot.app` to `/Applications` and the `macpilot` command to `~/.local/bin`.
 
 ## First run
+
+On the first launch MacPilot reads **no files**: Processes, Battery, Apps and Startup work right away. Disk and Cleanup explain what they need (names, sizes and dates of files — never their contents) and ask first. You can keep any folder out — Desktop, Downloads, Pictures or any other — in Settings → Privacy, and change your mind there any time.
 
 Permissions are asked **once** and then remembered, including after updates:
 

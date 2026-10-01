@@ -52,6 +52,11 @@ pub fn open_full_disk_access_settings() {
     let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").spawn();
 }
 
+/// Open System Settings → Privacy & Security → Files and Folders.
+pub fn open_files_and_folders_settings() {
+    let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders").spawn();
+}
+
 /// Run a command and return its stdout (empty on failure).
 pub fn run_output(cmd: &str, args: &[&str]) -> String {
     std::process::Command::new(cmd)

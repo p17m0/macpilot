@@ -41,6 +41,10 @@ pub struct Settings {
     pub check_updates: bool,
     /// macOS notifications about problems (a stuck app, a full disk, the battery).
     pub notifications: bool,
+    /// The user agreed that MacPilot reads the home folder (Disk, Cleanup). Asked on first use.
+    pub file_access: bool,
+    /// Folders MacPilot never opens: any folder, "~/…" for ones inside the home folder.
+    pub excluded: Vec<String>,
 }
 
 impl Default for Settings {
@@ -56,6 +60,8 @@ impl Default for Settings {
             menu_bar: true,
             check_updates: true,
             notifications: true,
+            file_access: false,
+            excluded: Vec::new(),
         }
     }
 }
@@ -72,6 +78,8 @@ impl Settings {
     pub fn load() -> Settings {
         let mut s = Settings::default();
         let Ok(text) = std::fs::read_to_string(file()) else { return s };
+        // Settings from before the question existed: the user has been using Disk and Cleanup already.
+        s.file_access = !text.lines().any(|l| l.trim_start().starts_with("file_access"));
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else { continue };
             let v = v.trim();
@@ -92,6 +100,9 @@ impl Settings {
                 "menu_bar" => s.menu_bar = v != "false",
                 "check_updates" => s.check_updates = v != "false",
                 "notifications" => s.notifications = v != "false",
+                "file_access" => s.file_access = v == "true",
+                // One folder per line: paths may contain commas.
+                "excluded" => s.excluded.push(v.to_string()),
                 _ => {}
             }
         }
@@ -106,7 +117,7 @@ impl Settings {
             Theme::Dark => "dark",
         };
         let text = format!(
-            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\n",
+            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\nfile_access = {}\n{}",
             self.lang.map(|l| l.code()).unwrap_or("system"),
             if self.style == UiStyle::Classic { "classic" } else { "standard" },
             self.stale_days,
@@ -115,13 +126,67 @@ impl Settings {
             self.scan_on_start,
             self.menu_bar,
             self.check_updates,
-            self.notifications
+            self.notifications,
+            self.file_access,
+            self.excluded.iter().map(|e| format!("excluded = {e}\n")).collect::<String>()
         );
         std::fs::write(file(), text)
+    }
+
+    /// Excluded folders as full paths.
+    pub fn excluded_paths(&self) -> Vec<PathBuf> {
+        self.excluded.iter().map(|e| expand(e)).collect()
+    }
+
+    pub fn is_excluded(&self, p: &std::path::Path) -> bool {
+        self.excluded.iter().any(|e| expand(e) == p)
+    }
+
+    /// Exclude a folder (or include it again).
+    pub fn set_excluded(&mut self, p: &std::path::Path, excluded: bool) {
+        let short = shorten(p);
+        self.excluded.retain(|e| expand(e) != p);
+        if excluded {
+            self.excluded.push(short);
+        }
     }
 
     /// Apply the language to the translation layer.
     pub fn apply_lang(&self) {
         crate::i18n::set_lang(self.lang.unwrap_or_else(Lang::system));
+    }
+}
+
+/// "~/Downloads" → "/Users/me/Downloads".
+pub fn expand(s: &str) -> PathBuf {
+    match s.strip_prefix("~/") {
+        Some(rest) => crate::home().join(rest),
+        None if s == "~" => crate::home(),
+        None => PathBuf::from(s),
+    }
+}
+
+/// "/Users/me/Downloads" → "~/Downloads" (kept readable in the settings file).
+pub fn shorten(p: &std::path::Path) -> String {
+    match p.strip_prefix(crate::home()) {
+        Ok(rest) if !rest.as_os_str().is_empty() => format!("~/{}", rest.display()),
+        _ => p.display().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excluded_folders_round_trip() {
+        let mut s = Settings::default();
+        let dl = crate::home().join("Downloads");
+        s.set_excluded(&dl, true);
+        s.set_excluded(std::path::Path::new("/Volumes/Backup, old"), true);
+        assert_eq!(s.excluded, vec!["~/Downloads".to_string(), "/Volumes/Backup, old".to_string()]);
+        assert!(s.is_excluded(&dl));
+        s.set_excluded(&dl, false);
+        assert_eq!(s.excluded_paths(), vec![PathBuf::from("/Volumes/Backup, old")]);
     }
 }

@@ -71,7 +71,15 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let mut out = Vec::new();
     let s = &g.snap;
 
-    if !g.full_disk_access {
+    if !g.settings.file_access {
+        out.push(Rec {
+            color: C::accent(),
+            title: tr("Disk and Cleanup are waiting for your permission").into(),
+            text: tr("MacPilot has not looked at any of your files yet. Allow it to see what takes space — you choose which folders.").into(),
+            button: tr("Set up"),
+            go: Box::new(|g| g.go_page(Page::Disk)),
+        });
+    } else if !g.full_disk_access {
         // How much of the disk is out of sight right now (data volume minus what the scan sees).
         let hidden = {
             let sp = g.space.lock().unwrap();
@@ -282,7 +290,10 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
             out.push(Rec {
                 color: C::yellow(),
                 title: trf("{0} left by removed apps", &[&fmt::bytes(size)]),
-                text: trf("{0} in your Library belong to apps that are no longer installed.", &[&fmt::n(o.len() as u64, fmt::Noun::Folder)]),
+                text: trf(
+                    "{0} in your Library belong to apps that are no longer installed.",
+                    &[&fmt::n(o.iter().map(|x| x.items.len() as u64).sum::<u64>(), fmt::Noun::Item)],
+                ),
                 button: tr("Review"),
                 go: Box::new(|g| {
                     g.apps_mode = AppsMode::Leftovers;

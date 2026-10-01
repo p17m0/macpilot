@@ -1,10 +1,12 @@
 //! MacPilot — the window app.
 
+mod access_view;
 mod apps_view;
 mod autostart;
 mod battery_view;
 mod clean_view;
 mod disk_view;
+mod icons;
 mod mac;
 mod overview;
 mod procs_view;
@@ -184,6 +186,8 @@ pub struct Gui {
     pub battery_days: i64,
     last_battery_sample: Option<(i64, bool)>,
 
+    pub settings_tab: settings_view::SettingsTab,
+
     // Disk
     pub space: Arc<Mutex<SpaceInfo>>,
     /// "What changed" period, days, and the result: (baseline time, changes).
@@ -264,7 +268,8 @@ struct Shot {
 
 impl Gui {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let settings = Settings::load();
+        // MACPILOT_FRESH=1 (developer screenshots): look like a first launch.
+        let settings = if cfg!(feature = "dev-tools") && std::env::var("MACPILOT_FRESH").is_ok() { Settings::default() } else { Settings::load() };
         match std::env::var("MACPILOT_LANG").ok().and_then(|l| macpilot::i18n::Lang::from_code(&l)) {
             Some(l) => macpilot::i18n::set_lang(l),
             None => settings.apply_lang(),
@@ -362,18 +367,6 @@ impl Gui {
 
         let (tx, rx) = channel();
         let targets = clean::targets();
-        {
-            let (mtx, mrx) = channel();
-            clean::measure_all(&targets, mtx);
-            let tx = tx.clone();
-            let ctx = ctx.clone();
-            std::thread::spawn(move || {
-                for (i, st) in mrx {
-                    let _ = tx.send(Msg::Measured(i, st));
-                    ctx.request_repaint();
-                }
-            });
-        }
         // Startup items, apps and leftovers of removed apps — in the background.
         {
             let tx = tx.clone();
@@ -416,6 +409,7 @@ impl Gui {
             only_mine: false,
             sel: None,
             focus_search: false,
+            settings_tab: settings_view::SettingsTab::default(),
             space,
             changes_days: 7,
             changes: None,
@@ -474,8 +468,13 @@ impl Gui {
             shot: None,
             settings,
         };
-        if g.settings.scan_on_start {
-            g.start_home_scan();
+        // Nothing is read from the home folder until the user agreed (asked on the Disk and Cleanup pages).
+        macpilot::disk::set_excluded(g.settings.excluded_paths());
+        if g.settings.file_access {
+            g.remeasure_targets();
+            if g.settings.scan_on_start {
+                g.start_home_scan();
+            }
         }
         if g.settings.notifications {
             mac::init_notifications();
@@ -508,6 +507,10 @@ impl Gui {
             "apps" => Page::Apps,
             "startup" => Page::Startup,
             "settings" => Page::Settings,
+            "privacy" => {
+                self.settings_tab = settings_view::SettingsTab::Privacy;
+                Page::Settings
+            }
             _ => Page::Overview,
         };
         self.go_page(p);
@@ -533,7 +536,7 @@ impl Gui {
 
     pub fn go_page(&mut self, p: Page) {
         self.page = p;
-        if matches!(p, Page::Disk | Page::Clean | Page::Overview) && self.scan.is_none() {
+        if matches!(p, Page::Disk | Page::Clean | Page::Overview) && self.scan.is_none() && self.settings.file_access {
             self.start_home_scan();
         }
     }
@@ -768,7 +771,11 @@ impl Gui {
         self.stale.retain(|i| !is_gone(&i.path));
         self.junk.retain(|j| !is_gone(&j.path));
         if let Some(o) = &mut self.orphans {
-            o.retain(|x| !is_gone(&x.path));
+            for x in o.iter_mut() {
+                x.items.retain(|(p, _)| !is_gone(p));
+                x.size = x.items.iter().filter_map(|(_, s)| *s).sum();
+            }
+            o.retain(|x| !x.items.is_empty());
         }
         if let Some(a) = &mut self.apps {
             a.retain(|x| !is_gone(&x.path));
@@ -807,6 +814,49 @@ impl Gui {
             let _ = tx.send(Msg::Measured(i, disk::measure(&p)));
             ctx.request_repaint();
         });
+    }
+
+    /// Open Settings on the Privacy tab.
+    pub fn open_privacy(&mut self) {
+        self.settings_tab = settings_view::SettingsTab::Privacy;
+        self.go_page(Page::Settings);
+    }
+
+    /// The user agreed that MacPilot reads the home folder.
+    pub fn grant_file_access(&mut self) {
+        self.settings.file_access = true;
+        self.save_settings();
+        macpilot::disk::set_excluded(self.settings.excluded_paths());
+        self.remeasure_targets();
+        self.start_home_scan();
+    }
+
+    /// Stop reading files: forget the scan and every list built from it.
+    pub fn revoke_file_access(&mut self) {
+        self.settings.file_access = false;
+        self.save_settings();
+        self.scan = None;
+        self.rescan = None;
+        self.rescan_when_plugged = false;
+        self.dupes = None;
+        self.stale.clear();
+        self.junk.clear();
+        self.big.clear();
+        self.entries.clear();
+        self.changes = None;
+        for t in &mut self.targets {
+            t.stat = None;
+        }
+    }
+
+    /// The excluded folders changed: apply them and scan again without (or with) them.
+    pub fn exclusions_changed(&mut self) {
+        self.save_settings();
+        macpilot::disk::set_excluded(self.settings.excluded_paths());
+        if self.settings.file_access {
+            self.remeasure_targets();
+            self.start_scan(macpilot::home());
+        }
     }
 
     pub fn remeasure_targets(&mut self) {

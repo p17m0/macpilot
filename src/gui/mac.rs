@@ -236,7 +236,7 @@ fn can_notify() -> bool {
     std::env::current_exe().ok().and_then(|e| macpilot::procs::outer_app(&e)).is_some()
 }
 
-/// Ask for permission (macOS asks the user once) and start listening for clicks.
+/// Start listening for clicks on notifications. Permission is asked later, with the first real one.
 pub fn init_notifications() {
     let Some(mtm) = MainThreadMarker::new() else { return };
     if !can_notify() || NOTIFY.with(|n| n.borrow().is_some()) {
@@ -246,23 +246,104 @@ pub fn init_notifications() {
     let delegate: Retained<NotifyDelegate> = unsafe { msg_send![NotifyDelegate::alloc(mtm), init] };
     center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     NOTIFY.with(|n| *n.borrow_mut() = Some(delegate));
-    let done = block2::RcBlock::new(|_granted: objc2::runtime::Bool, _err: *mut objc2_foundation::NSError| {});
-    center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &done);
 }
 
 /// Show a notification. The same `id` replaces the previous one instead of stacking up.
+/// The first one asks macOS for permission (so the question comes with a reason) and is sent once allowed.
 pub fn notify(id: &str, title: &str, body: &str) {
     if !can_notify() || NOTIFY.with(|n| n.borrow().is_none()) {
         return;
     }
-    let content = UNMutableNotificationContent::new();
-    content.setTitle(&ns(title));
-    content.setBody(&ns(body));
-    let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&ns(id), &content, None);
-    UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, None);
+    let (id, title, body) = (id.to_string(), title.to_string(), body.to_string());
+    let done = block2::RcBlock::new(move |granted: objc2::runtime::Bool, _err: *mut objc2_foundation::NSError| {
+        if !granted.as_bool() {
+            return;
+        }
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&ns(&title));
+        content.setBody(&ns(&body));
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&ns(&id), &content, None);
+        UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, None);
+    });
+    // Asks only the first time; afterwards it answers at once with the user's choice.
+    UNUserNotificationCenter::currentNotificationCenter()
+        .requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &done);
 }
 
 /// The id of a notification the user clicked since the last call.
 pub fn take_clicked() -> Option<String> {
     CLICKED.lock().unwrap().take()
+}
+
+// ---------------------------------------------------------------------------
+// Choosing folders
+// ---------------------------------------------------------------------------
+
+/// The standard "choose a folder" dialog; returns the chosen folders (empty when cancelled).
+pub fn choose_folders(prompt: &str, message: &str) -> Vec<std::path::PathBuf> {
+    let Some(mtm) = MainThreadMarker::new() else { return Vec::new() };
+    let panel = objc2_app_kit::NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseDirectories(true);
+    panel.setCanChooseFiles(false);
+    panel.setAllowsMultipleSelection(true);
+    panel.setCanCreateDirectories(false);
+    panel.setPrompt(Some(&ns(prompt)));
+    panel.setMessage(Some(&ns(message)));
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return Vec::new();
+    }
+    panel.URLs().iter().filter_map(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string())).collect()
+}
+
+// ---------------------------------------------------------------------------
+// File icons
+// ---------------------------------------------------------------------------
+
+/// The Finder icon of `path` (of a Unix executable when `None`), drawn at `px`×`px` pixels.
+/// Premultiplied RGBA, top row first.
+pub fn icon_rgba(path: Option<&std::path::Path>, px: usize) -> Option<Vec<u8>> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSWorkspace};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    MainThreadMarker::new()?;
+    let ws = NSWorkspace::sharedWorkspace();
+    let image = match path {
+        Some(p) => ws.iconForFile(&ns(p.to_str()?)),
+        // Any Unix executable has the generic "exec" icon.
+        None => ws.iconForFile(&ns("/bin/sh")),
+    };
+    let n = px as isize;
+    let rep = unsafe {
+        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(),
+            std::ptr::null_mut(),
+            n,
+            n,
+            8,
+            4,
+            true,
+            false,
+            NSDeviceRGBColorSpace,
+            n * 4,
+            32,
+        )
+    }?;
+    let ctx = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
+    NSGraphicsContext::saveGraphicsState_class();
+    NSGraphicsContext::setCurrentContext(Some(&ctx));
+    image.drawInRect(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(px as f64, px as f64)));
+    ctx.flushGraphics();
+    NSGraphicsContext::restoreGraphicsState_class();
+    let data = rep.bitmapData();
+    if data.is_null() {
+        return None;
+    }
+    let row = rep.bytesPerRow() as usize;
+    let mut out = Vec::with_capacity(px * px * 4);
+    for y in 0..px {
+        // SAFETY: the bitmap has `px` rows of `row` >= px * 4 bytes and lives as long as `rep`.
+        out.extend_from_slice(unsafe { std::slice::from_raw_parts(data.add(y * row), px * 4) });
+    }
+    Some(out)
 }

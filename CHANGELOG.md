@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Nothing is read before you agree.** On the first launch MacPilot looks at no files: Processes, Battery, Apps and Startup work right away, and Disk and Cleanup first explain what they read (names, sizes and dates — never contents) and ask. Settings → Privacy can turn it off again.
+- **Folders MacPilot never opens** (Settings → Privacy → Don't scan): switch on Desktop, Documents, Downloads, Movies, Music, Pictures or iCloud Drive, add any other folder, or use "Exclude from MacPilot" on the Disk page. They are never opened — not by the scan, the duplicate finder or cleanup.
+- The notification permission is asked with the first real notification, not at launch.
+- **Settings in tabs**: General, Privacy, Disk and Cleanup. Privacy has a "Don't scan" list — the standard folders with a switch each, and your own folders with "Add folder…".
+- **Leftovers of removed apps, found much more completely**: 13 places of `~/Library` (Containers, Group Containers, Application Support, Application Scripts, Caches, Logs, Preferences and ByHost, Saved Application State, HTTPStorages, WebKit, Cookies, background downloads), by bundle id and by the app's name ("Application Support/Kiro"). Grouped per app, with helpers such as auto-updaters merged in. Sizes inside other apps' containers show as unknown without Full Disk Access instead of being dropped. Apple's data, Homebrew services and updaters shared with installed apps (Google Keystone, Microsoft AutoUpdate) are not listed. "Select all" selects everything and turns into "Deselect all".
+- Uninstalling an app uses the same places and the same name matching.
+- Tests for excluded folders (scan, measuring, listing, duplicates) and for the leftover search.
+- README: how to open a non-notarized release on macOS 15 and later (right-click → Open no longer skips the warning).
+- **Real app icons** in Apps, Processes and on the Disk page, as in Finder (grey in the Classic style). Processes that are not apps get the Unix executable icon.
+
 ## 0.5.0
 
 - **Classic Macintosh style** (Settings → Style), light and dark: black and white (white on black in the dark theme), 1-pixel lines, square corners, hard drop shadows, striped page titles and a pixel font (Pixelify Sans, SIL OFL). The standard look stays the default.

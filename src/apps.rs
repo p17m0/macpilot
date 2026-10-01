@@ -96,57 +96,12 @@ pub fn list() -> Vec<AppInfo> {
     apps
 }
 
-/// Where apps keep their data, and whether a match there is by bundle id or also by name.
-fn leftover_places() -> Vec<(PathBuf, bool)> {
-    let l = home().join("Library");
-    vec![
-        (l.join("Application Support"), true),
-        (l.join("Caches"), true),
-        (l.join("Containers"), false),
-        (l.join("Group Containers"), false),
-        (l.join("Preferences"), false),
-        (l.join("Preferences/ByHost"), false),
-        (l.join("Saved Application State"), false),
-        (l.join("Logs"), true),
-        (l.join("HTTPStorages"), false),
-        (l.join("WebKit"), false),
-        (l.join("Cookies"), false),
-        (l.join("Application Scripts"), false),
-        (l.join("LaunchAgents"), false),
-        (l.join("Caches/com.apple.nsurlsessiond/Downloads"), false),
-    ]
-}
-
-/// Does a Library entry belong to `id` (or to `name`, where names are used)?
-fn belongs(entry: &str, id: &str, name: Option<&str>) -> bool {
-    let e = entry.to_lowercase();
-    let id = id.to_lowercase();
-    if id.len() < 4 {
-        return false;
-    }
-    let stem = e.trim_end_matches(".plist").trim_end_matches(".savedstate").trim_end_matches(".binarycookies");
-    // Exact id, id with suffixes (com.foo.app.helper), ByHost (com.foo.app.UUID), group (TEAMID.com.foo.app).
-    let exact = stem == id || stem.starts_with(&format!("{id}.")) || stem.ends_with(&format!(".{id}")) || stem.contains(&format!(".{id}."));
-    exact || name.is_some_and(|n| n.len() >= 3 && e == n.to_lowercase())
-}
-
-/// Leftover files and folders of one app, with sizes.
+/// Leftover files and folders of one installed app (for a full uninstall), with sizes.
 pub fn leftovers(app: &AppInfo) -> Vec<(PathBuf, u64)> {
     if app.bundle_id.is_empty() {
         return Vec::new();
     }
-    let mut found = Vec::new();
-    for (dir, by_name) in leftover_places() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().to_string();
-            if belongs(&n, &app.bundle_id, by_name.then_some(app.name.as_str())) {
-                found.push(e.path());
-            }
-        }
-    }
-    found.sort();
-    found.dedup();
+    let found = traces_in(&home().join("Library"), &app.bundle_id, &[app.name.clone(), name_of_id(&app.bundle_id)]);
     crate::disk::apps_pool().install(|| {
         found
             .into_par_iter()
@@ -158,17 +113,63 @@ pub fn leftovers(app: &AppInfo) -> Vec<(PathBuf, u64)> {
     })
 }
 
+/// Everything in `lib` (a Library folder) that belongs to the app `id`: entries named by its bundle id
+/// or a helper's ("com.foo.app.ShipIt"), and folders named like the app in the places that use names.
+fn traces_in(lib: &Path, id: &str, names: &[String]) -> Vec<PathBuf> {
+    let id = id.to_lowercase();
+    if id.len() < 4 {
+        return Vec::new();
+    }
+    let names: Vec<String> = names.iter().map(|n| loose(n)).filter(|n| n.len() >= 3).collect();
+    let mut found = Vec::new();
+    for (place, by_name) in PLACES {
+        let Ok(rd) = std::fs::read_dir(lib.join(place)) else { continue };
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            let eid = id_of_entry(&n).to_lowercase();
+            let by_id = eid == id || eid.starts_with(&format!("{id}."));
+            let by_nm = *by_name && !n.contains('.') && names.contains(&loose(&n));
+            if by_id || by_nm {
+                found.push(e.path());
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Everything one removed app left behind, possibly in several places of ~/Library.
 #[derive(Clone, Debug)]
 pub struct Orphan {
-    pub path: PathBuf,
+    /// Bundle id ("com.hnc.Discord").
     pub id: String,
+    /// Readable name ("Discord").
+    pub name: String,
+    /// The files and folders, with their size (`None`: cannot be measured without Full Disk Access).
+    pub items: Vec<(PathBuf, Option<u64>)>,
+    /// Sum of the sizes that are known.
     pub size: u64,
 }
 
 impl Orphan {
     /// Sandboxed apps keep their documents inside their container.
     pub fn may_hold_documents(&self) -> bool {
-        self.path.components().any(|c| c.as_os_str() == "Containers" || c.as_os_str() == "Group Containers")
+        self.items.iter().any(|(p, _)| p.components().any(|c| c.as_os_str() == "Containers" || c.as_os_str() == "Group Containers"))
+    }
+
+    /// Some sizes are unknown (containers without Full Disk Access).
+    pub fn size_unknown(&self) -> bool {
+        self.items.iter().any(|(_, s)| s.is_none())
+    }
+
+    /// Identifies the group in a selection.
+    pub fn key(&self) -> &Path {
+        &self.items[0].0
+    }
+
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.items.iter().map(|(p, _)| p.clone()).collect()
     }
 }
 
@@ -178,57 +179,230 @@ fn looks_like_bundle_id(s: &str) -> bool {
     parts.len() >= 3 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
-/// Data left behind by apps that are no longer installed (by bundle id, in Containers,
-/// Application Support, Caches, Saved Application State and HTTPStorages). Apple's own ids are ignored.
+/// The bundle id in the name of an entry of ~/Library: "com.foo.app.plist", "com.foo.app.savedState",
+/// "ABCDE12345.com.foo.app" (group container with a team id), "group.com.foo", "com.foo.app.<UUID>.plist".
+fn id_of_entry(name: &str) -> String {
+    let mut n = name;
+    for suffix in [".plist", ".savedState", ".binarycookies"] {
+        n = n.strip_suffix(suffix).unwrap_or(n);
+    }
+    // ByHost preferences end with the hardware UUID.
+    if let Some((head, tail)) = n.rsplit_once('.') {
+        if tail.len() == 36 && tail.matches('-').count() == 4 {
+            n = head;
+        }
+    }
+    let n = n.strip_prefix("group.").or_else(|| n.strip_prefix("groups.")).or_else(|| n.strip_prefix("systemgroup.")).unwrap_or(n);
+    // Team id prefix: ten uppercase letters and digits.
+    match n.split_once('.') {
+        Some((team, rest)) if team.len() == 10 && team.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) => rest.to_string(),
+        _ => n.to_string(),
+    }
+}
+
+/// A readable app name from a bundle id: the last part that says something.
+/// "com.hnc.Discord" → "Discord", "dev.kiro.desktop" → "Kiro", "app.hiddify.com" → "Hiddify".
+fn name_of_id(id: &str) -> String {
+    const VAGUE: &[&str] = &[
+        "com",
+        "org",
+        "net",
+        "io",
+        "app",
+        "dev",
+        "co",
+        "ru",
+        "de",
+        "nl",
+        "fr",
+        "uk",
+        "us",
+        "me",
+        "ai",
+        "macos",
+        "mac",
+        "osx",
+        "desktop",
+        "client",
+        "ide",
+        "helper",
+        "launcher",
+        "agent",
+        "steam",
+        "app-store",
+        "appstore",
+        "release",
+        "beta",
+        "pro",
+    ];
+    let parts: Vec<&str> = id.split('.').collect();
+    let pick = parts.iter().rev().find(|p| p.len() > 1 && !VAGUE.contains(&p.to_lowercase().as_str())).or(parts.last()).copied().unwrap_or(id);
+    let mut c = pick.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+/// Folder names compared loosely: case, spaces, dashes and underscores do not matter.
+fn loose(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// Where apps leave data, in ~/Library, and whether apps also use their plain name there
+/// ("Application Support/Discord") instead of their bundle id.
+const PLACES: &[(&str, bool)] = &[
+    ("Containers", false),
+    ("Group Containers", false),
+    ("Application Support", true),
+    ("Application Scripts", false),
+    ("Caches", true),
+    ("Logs", true),
+    ("Preferences", false),
+    ("Preferences/ByHost", false),
+    ("Saved Application State", false),
+    ("HTTPStorages", false),
+    ("WebKit", false),
+    ("Cookies", false),
+    ("Caches/com.apple.nsurlsessiond/Downloads", false),
+    // Services: a removed app's agent is removed with it, but in general an agent may belong to a
+    // command-line tool (Homebrew services and the like) — the Startup page judges those.
+    ("LaunchAgents", false),
+];
+
+/// Data of Apple's own apps, some of which use unusual ids (Shortcuts kept Workflow's "is.workflow").
+fn is_apple(id: &str) -> bool {
+    let l = id.to_lowercase();
+    ["com.apple.", "apple.", "is.workflow.", "swift-playgrounds"].iter().any(|p| l.starts_with(p))
+}
+
+/// Places not searched for leftovers of removed apps (see `PLACES`).
+const NOT_FOR_LEFTOVERS: &[&str] = &["LaunchAgents"];
+
+/// Updaters shared by all apps of a vendor: (id prefix, vendor prefix of an installed app).
+const SHARED_UPDATERS: &[(&str, &str)] = &[
+    ("com.google.keystone", "com.google."),
+    ("com.google.googleupdater", "com.google."),
+    ("com.google.softwareupdate", "com.google."),
+    ("com.microsoft.autoupdate", "com.microsoft."),
+];
+
+/// Data left behind by apps that are no longer installed, grouped by app. Found by bundle id in
+/// every place of ~/Library where apps keep data, and by the app's name in Application Support,
+/// Caches and Logs. Apple's own data, installed apps and their helpers are skipped.
 pub fn orphans(apps: &[AppInfo]) -> Vec<Orphan> {
     let installed: HashSet<String> = apps.iter().map(|a| a.bundle_id.to_lowercase()).filter(|s| !s.is_empty()).collect();
-    // Also treat apps outside /Applications (e.g. inside other apps or in /System) as installed.
+    let installed_names: Vec<String> = apps.iter().map(|a| loose(&a.name)).filter(|n| n.len() >= 4).collect();
+    // "Docker Desktop" belongs to the installed "Docker": names that contain an installed app's name are kept.
+    let like_installed = |name: &str| {
+        let n = loose(name);
+        n.len() >= 4 && installed_names.iter().any(|i| n.contains(i.as_str()) || i.contains(n.as_str()))
+    };
     // The same vendor ("com.zoom.*") as an installed app means it is probably that app's helper
     // (updaters, agents and extensions often have their own ids) — not a leftover.
     let vendor = |id: &str| id.split('.').take(2).collect::<Vec<_>>().join(".");
     let vendors: HashSet<String> = installed.iter().map(|i| vendor(i)).filter(|v| v.len() > 4 && !GENERIC_VENDORS.contains(&v.as_str())).collect();
     let is_installed = |id: &str| {
         let id = id.to_lowercase();
-        installed.iter().any(|i| id == *i || id.starts_with(&format!("{i}.")) || i.starts_with(&format!("{id}."))) || vendors.contains(&vendor(&id))
+        let updater = SHARED_UPDATERS.iter().any(|(u, v)| id.starts_with(u) && installed.iter().any(|i| i.starts_with(v)));
+        updater
+            || installed.iter().any(|i| id == *i || id.starts_with(&format!("{i}.")) || i.starts_with(&format!("{id}.")))
+            || vendors.contains(&vendor(&id))
     };
-    let l = home().join("Library");
-    let dirs = [l.join("Containers"), l.join("Application Support"), l.join("Caches"), l.join("Saved Application State"), l.join("HTTPStorages")];
-    let mut cands = Vec::new();
-    for d in dirs {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().to_string();
-            let id = n.trim_end_matches(".savedState").trim_end_matches(".binarycookies").to_string();
-            if !looks_like_bundle_id(&id) {
-                continue;
-            }
+    let groups = group_entries(
+        &home().join("Library"),
+        &|id: &str| {
             let lower = id.to_lowercase();
-            if lower.starts_with("com.apple.") || lower.starts_with("group.com.apple") || is_installed(&id) {
-                continue;
-            }
-            // A process with this id may still be around (menu bar helpers, CLI tools).
-            if has_running_or_cli(&lower) {
-                continue;
-            }
-            cands.push((e.path(), id));
-        }
-    }
+            is_apple(id)
+                || is_installed(id)
+                || like_installed(&name_of_id(id))
+                || like_installed(id.rsplit('.').next().unwrap_or(id))
+                || has_running_or_cli(&lower)
+        },
+        &like_installed,
+    );
+
     let mut out: Vec<Orphan> = crate::disk::apps_pool().install(|| {
-        cands
+        groups
             .into_par_iter()
-            .map(|(path, id)| {
-                let size = crate::disk::measure(&path).size;
-                Orphan { path, id, size }
+            .map(|(_, (id, paths))| {
+                // Inside other apps' containers sizes need Full Disk Access; unknown is shown as such.
+                let items: Vec<(PathBuf, Option<u64>)> =
+                    paths.into_iter().map(|p| (p.clone(), crate::disk::reachable(&p.join("x")).then(|| crate::disk::measure(&p).size))).collect();
+                let size = items.iter().filter_map(|(_, s)| *s).sum();
+                Orphan { name: name_of_id(&id), id, items, size }
             })
-            .filter(|o| o.size >= 100_000)
             .collect()
     });
-    out.sort_by_key(|a| std::cmp::Reverse(a.size));
+    for o in &mut out {
+        o.items.sort_by_key(|(_, s)| std::cmp::Reverse(s.unwrap_or(0)));
+    }
+    out.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
     out
 }
 
+/// Library entries of apps, grouped by bundle id: (lowercased id → (id, paths)). Helpers
+/// ("com.foo.app.ShipIt") join their app, and folders named like the app join too.
+/// `skip_id` drops ids that are not leftovers; `skip_name` drops names that belong to installed apps.
+type Groups = HashMap<String, (String, Vec<PathBuf>)>;
+
+fn group_entries(lib: &Path, skip_id: &dyn Fn(&str) -> bool, skip_name: &dyn Fn(&str) -> bool) -> Groups {
+    // 1. Entries named by bundle id.
+    let mut groups: Groups = HashMap::new();
+    for (place, _) in PLACES.iter().filter(|(p, _)| !NOT_FOR_LEFTOVERS.contains(p)) {
+        let Ok(rd) = std::fs::read_dir(lib.join(place)) else { continue };
+        for e in rd.flatten() {
+            let id = id_of_entry(&e.file_name().to_string_lossy());
+            if !looks_like_bundle_id(&id) || skip_id(&id) {
+                continue;
+            }
+            groups.entry(id.to_lowercase()).or_insert_with(|| (id.clone(), Vec::new())).1.push(e.path());
+        }
+    }
+
+    // Helpers of an app ("dev.kiro.desktop.ShipIt") join the app's group.
+    let mut keys: Vec<String> = groups.keys().cloned().collect();
+    keys.sort_by_key(|k| k.len());
+    for k in keys {
+        let parent = groups.keys().filter(|p| k.starts_with(&format!("{p}."))).min_by_key(|p| p.len()).cloned();
+        if let Some(parent) = parent {
+            if let Some((_, paths)) = groups.remove(&k) {
+                if let Some(g) = groups.get_mut(&parent) {
+                    g.1.extend(paths);
+                }
+            }
+        }
+    }
+
+    // 2. Folders named like one of those apps ("Application Support/Discord" next to "com.hnc.Discord").
+    let mut by_name: HashMap<String, String> = HashMap::new();
+    for (key, (id, _)) in &groups {
+        for n in [name_of_id(id), id.rsplit('.').next().unwrap_or(id).to_string()] {
+            if loose(&n).len() >= 4 && !skip_name(&n) {
+                by_name.insert(loose(&n), key.clone());
+            }
+        }
+    }
+    for (place, named) in PLACES {
+        if !named {
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(lib.join(place)) else { continue };
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if n.contains('.') || !e.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            if let Some(key) = by_name.get(&loose(&n)) {
+                if let Some(g) = groups.get_mut(key) {
+                    g.1.push(e.path());
+                }
+            }
+        }
+    }
+    groups
+}
+
 /// Vendor prefixes shared by unrelated apps.
-const GENERIC_VENDORS: &[&str] = &["com.example", "com.github", "org.mozilla", "com.google", "io.github", "com.microsoft"];
+const GENERIC_VENDORS: &[&str] =
+    &["com.example", "com.github", "org.mozilla", "com.google", "io.github", "com.microsoft", "com.electron", "org.webkit"];
 
 /// Bundle ids of apps that live elsewhere (inside other apps, Homebrew casks, system extensions).
 fn has_running_or_cli(id: &str) -> bool {
@@ -252,18 +426,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn matches_leftovers_by_id() {
-        assert!(belongs("com.foo.Bar", "com.foo.bar", None));
-        assert!(belongs("com.foo.bar.plist", "com.foo.bar", None));
-        assert!(belongs("com.foo.bar.ABCD-1234.plist", "com.foo.bar", None));
-        assert!(belongs("TEAM123.com.foo.bar", "com.foo.bar", None));
-        assert!(belongs("com.foo.bar.savedState", "com.foo.bar", None));
-        assert!(belongs("Bar", "com.foo.bar", Some("Bar")));
-        assert!(!belongs("com.foo.barista", "com.foo.bar", None));
-        assert!(!belongs("Bar", "com.foo.bar", None));
-    }
-
-    #[test]
     fn parses_spotlight_dates() {
         assert_eq!(parse_mdls_date("1970-01-02 00:00:10 +0000"), Some(86_410));
         assert_eq!(parse_mdls_date("2026-09-23 16:51:08 +0000"), Some(1_790_182_268));
@@ -274,5 +436,97 @@ mod tests {
         assert!(looks_like_bundle_id("com.docker.docker"));
         assert!(!looks_like_bundle_id("Google"));
         assert!(!looks_like_bundle_id("some folder.v2"));
+    }
+}
+
+#[cfg(test)]
+mod orphan_tests {
+    use super::*;
+
+    /// A small fake Library with an app's traces in many places, plus things that must not count.
+    fn fake_library(tag: &str) -> PathBuf {
+        let lib = std::env::temp_dir().join(format!("macpilot-lib-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&lib);
+        for d in [
+            "Application Support/com.foo.Bard",
+            "Application Support/Bard",
+            "Application Support/com.apple.Notes",
+            "Caches/Docker Desktop",
+            "Containers/com.foo.Bard",
+            "Group Containers/ABCDE12345.com.foo.Bard",
+            "Preferences/ByHost",
+            "LaunchAgents",
+        ] {
+            std::fs::create_dir_all(lib.join(d)).unwrap();
+        }
+        std::fs::write(lib.join("Application Support/Bard/data.db"), b"x").unwrap();
+        for f in [
+            "Preferences/com.foo.Bard.plist",
+            "Preferences/ByHost/com.foo.Bard.ShipIt.0A1B2C3D-1111-2222-3333-444455556666.plist",
+            "Preferences/com.electron.dockerdesktop.plist",
+            "LaunchAgents/com.foo.Bard.agent.plist",
+            "LaunchAgents/homebrew.mxcl.redis.plist",
+            "Preferences/com.foo.bardista.plist",
+        ] {
+            std::fs::write(lib.join(f), b"x").unwrap();
+        }
+        lib
+    }
+
+    #[test]
+    fn leftovers_of_removed_apps() {
+        let lib = fake_library("orphans");
+        // "Docker" is installed, so "Docker Desktop" and com.electron.dockerdesktop are its own data.
+        let installed = ["docker".to_string()];
+        let like_installed = |n: &str| installed.iter().any(|i| loose(n).contains(i.as_str()));
+        let groups = group_entries(&lib, &|id: &str| is_apple(id) || like_installed(&name_of_id(id)), &like_installed);
+        let bar = &groups["com.foo.bard"].1;
+        let rel: Vec<String> = bar.iter().map(|p| p.strip_prefix(&lib).unwrap().display().to_string()).collect();
+        for want in [
+            "Application Support/com.foo.Bard",
+            "Application Support/Bard",
+            "Containers/com.foo.Bard",
+            "Group Containers/ABCDE12345.com.foo.Bard",
+            "Preferences/com.foo.Bard.plist",
+            "Preferences/ByHost/com.foo.Bard.ShipIt.0A1B2C3D-1111-2222-3333-444455556666.plist",
+        ] {
+            assert!(rel.iter().any(|r| r == want), "missing {want} in {rel:?}");
+        }
+        // Services are judged on the Startup page, not here.
+        assert!(!rel.iter().any(|r| r.starts_with("LaunchAgents")), "{rel:?}");
+        assert!(!rel.iter().any(|r| r.contains("bardista")), "another app with a longer id: {rel:?}");
+        assert_eq!(groups.len(), 2, "Bard and Bardista are leftovers: {:?}", groups.keys().collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&lib);
+    }
+
+    #[test]
+    fn traces_of_an_installed_app() {
+        let lib = fake_library("traces");
+        let t = traces_in(&lib, "com.foo.Bard", &["Bard".into()]);
+        let rel: Vec<String> = t.iter().map(|p| p.strip_prefix(&lib).unwrap().display().to_string()).collect();
+        assert_eq!(rel.len(), 7, "{rel:?}"); // six above + its launch agent
+        assert!(rel.iter().any(|r| r == "LaunchAgents/com.foo.Bard.agent.plist"));
+        assert!(!rel.iter().any(|r| r.contains("redis") || r.contains("Docker") || r.contains("bardista")), "{rel:?}");
+        let _ = std::fs::remove_dir_all(&lib);
+    }
+
+    #[test]
+    fn ids_from_library_entries() {
+        assert_eq!(id_of_entry("com.hnc.Discord.plist"), "com.hnc.Discord");
+        assert_eq!(id_of_entry("com.hnc.Discord.savedState"), "com.hnc.Discord");
+        assert_eq!(id_of_entry("com.hnc.Discord.binarycookies"), "com.hnc.Discord");
+        assert_eq!(id_of_entry("com.foo.app.0A1B2C3D-1111-2222-3333-444455556666.plist"), "com.foo.app");
+        assert_eq!(id_of_entry("ABCDE12345.com.foo.app"), "com.foo.app");
+        assert_eq!(id_of_entry("group.com.foo.shared"), "com.foo.shared");
+        assert_eq!(id_of_entry("systemgroup.com.apple.icloud.plist"), "com.apple.icloud");
+        assert!(is_apple(&id_of_entry("groups.com.apple.podcasts")));
+        assert!(is_apple("is.workflow.shortcuts"));
+        assert!(!is_apple("com.hnc.Discord"));
+        assert_eq!(name_of_id("com.operasoftware.OperaGX"), "OperaGX");
+        assert_eq!(name_of_id("dev.kiro.desktop"), "Kiro");
+        assert_eq!(name_of_id("app.hiddify.com"), "Hiddify");
+        assert_eq!(name_of_id("com.aspyr.civ6.steam"), "Civ6");
+        assert_eq!(loose("Opera GX"), loose("OperaGX"));
+        assert_eq!(loose("visual-studio_code"), "visualstudiocode");
     }
 }

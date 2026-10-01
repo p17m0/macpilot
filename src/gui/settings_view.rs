@@ -25,165 +25,225 @@ fn row(ui: &mut Ui, title: &str, hint: &str, add: impl FnOnce(&mut Ui)) {
     ui.add_space(6.0);
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    Privacy,
+    Disk,
+}
+
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            ui.set_max_width(820.0);
-            w::header(ui, tr("Settings"), "");
-
-            let mut lang_changed = false;
-            row(ui, tr("Language"), tr("Language of the interface. “System” follows macOS."), |ui| {
-                let current = g.settings.lang;
-                let label = current.map(|l| l.native_name()).unwrap_or(tr("System"));
-                egui::ComboBox::from_id_salt("lang").selected_text(label).width(160.0).show_ui(ui, |ui| {
-                    if ui.selectable_label(current.is_none(), tr("System")).clicked() {
-                        g.settings.lang = None;
-                        lang_changed = true;
-                    }
-                    for l in Lang::ALL {
-                        if ui.selectable_label(current == Some(l), l.native_name()).clicked() {
-                            g.settings.lang = Some(l);
-                            lang_changed = true;
-                        }
-                    }
-                });
-            });
-            if lang_changed {
-                g.language_changed();
-            }
-
-            let mut style = g.settings.style;
-            row(ui, tr("Style"), tr("Classic looks like the first Macintosh: black and white, with a pixel font."), |ui| {
-                w::segmented(ui, &mut style, &[(UiStyle::Standard, tr("Standard")), (UiStyle::Classic, tr("Classic Macintosh"))]);
-            });
-            if style != g.settings.style {
-                g.settings.style = style;
-                g.apply_style();
-                g.save_settings();
-            }
-
-            let mut theme = g.settings.theme;
-            row(ui, tr("Appearance"), "", |ui| {
-                w::segmented(ui, &mut theme, &[(Theme::System, tr("System")), (Theme::Light, tr("Light")), (Theme::Dark, tr("Dark"))]);
-            });
-            if theme != g.settings.theme {
-                g.settings.theme = theme;
-                crate::apply_theme(ui.ctx(), theme);
-                g.save_settings();
-            }
-
-            let mut auto = g.autostart;
-            row(ui, tr("Open at login"), tr("Start MacPilot automatically when you log in."), |ui| {
-                w::switch(ui, &mut auto, tr("Open at login"));
-            });
-            if auto != g.autostart {
-                match autostart::set(auto) {
-                    Ok(()) => g.autostart = auto,
-                    Err(e) => g.toast(trf("Could not change launch at login: {0}", &[&e]), Level::Danger),
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                ui.set_max_width(820.0);
+                w::header(ui, tr("Settings"), "");
+                w::segmented(
+                    ui,
+                    &mut g.settings_tab,
+                    &[(SettingsTab::General, tr("General")), (SettingsTab::Privacy, tr("Privacy")), (SettingsTab::Disk, tr("Disk and Cleanup"))],
+                );
+                ui.add_space(10.0);
+                match g.settings_tab {
+                    SettingsTab::General => general(g, ui),
+                    SettingsTab::Privacy => privacy(g, ui),
+                    SettingsTab::Disk => disk(g, ui),
                 }
-            }
-
-            if g.autostart && autostart::needs_approval() {
-                w::note(ui, C::yellow(), tr("Launch at login is switched off in System Settings"), tr("Turn MacPilot on in System Settings → General → Login Items."));
-                if ui.button(tr("Login Items settings…")).clicked() {
-                    crate::mac::open_login_items_settings();
-                }
-            }
-
-            let mut bar = g.settings.menu_bar;
-            row(
-                ui,
-                tr("Show in the menu bar"),
-                tr("CPU and memory at a glance. Closing the window keeps MacPilot there; quit with ⌘Q or from its menu."),
-                |ui| {
-                    w::switch(ui, &mut bar, tr("Show in the menu bar"));
-                },
-            );
-            if bar != g.settings.menu_bar {
-                g.settings.menu_bar = bar;
-                g.save_settings();
-            }
-
-            let mut notes = g.settings.notifications;
-            row(
-                ui,
-                tr("Notifications"),
-                tr("Only about real problems: an app stuck in a loop, an almost full disk, a hot battery or an app draining it."),
-                |ui| {
-                    w::switch(ui, &mut notes, tr("Notifications"));
-                },
-            );
-            if notes != g.settings.notifications {
-                g.settings.notifications = notes;
-                if notes {
-                    crate::mac::init_notifications();
-                }
-                g.save_settings();
-            }
-
-            let mut scan = g.settings.scan_on_start;
-            row(ui, tr("Scan the home folder at launch"), tr("Needed for the Overview, Cleanup and “Not used” lists. Runs at low priority."), |ui| {
-                w::switch(ui, &mut scan, tr("Scan the home folder at launch"));
+                ui.add_space(10.0);
+                ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
             });
-            if scan != g.settings.scan_on_start {
-                g.settings.scan_on_start = scan;
-                g.save_settings();
-            }
-
-            let mut stale = g.settings.stale_days;
-            row(ui, tr("“Not used” threshold"), tr("Items not opened or changed for longer than this are listed."), |ui| {
-                w::segmented(ui, &mut stale, &[(90, tr("3 months")), (180, tr("6 months")), (365, tr("1 year")), (730, tr("2 years"))]);
-            });
-            if stale != g.settings.stale_days {
-                g.settings.stale_days = stale;
-                g.stale_days = stale;
-                g.stale_dirty = true;
-                g.save_settings();
-            }
-
-            let mut junk = g.settings.junk_days;
-            row(ui, tr("Inactive project after"), tr("Build folders of projects not changed for this long are pre-selected for removal."), |ui| {
-                w::segmented(ui, &mut junk, &[(7, tr("1 week")), (30, tr("1 month")), (90, tr("3 months")), (365, tr("1 year"))]);
-            });
-            if junk != g.settings.junk_days {
-                g.settings.junk_days = junk;
-                g.junk_dirty = true;
-                g.save_settings();
-            }
-
-            let mut mb = g.settings.dupes_min_mb;
-            row(ui, tr("Duplicates: ignore files smaller than"), "", |ui| {
-                w::segmented(ui, &mut mb, &[(1, "1 MB"), (10, "10 MB"), (100, "100 MB")]);
-            });
-            if mb != g.settings.dupes_min_mb {
-                g.settings.dupes_min_mb = mb;
-                g.save_settings();
-            }
-
-            ui.add_space(10.0);
-            w::card(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.label(RichText::new(tr("Permissions")).strong());
-                ui.label(RichText::new(tr("For a complete picture give MacPilot Full Disk Access. When you first remove something, allow MacPilot to control Finder — then “Put Back” works in the Trash.")).color(C::dim(ui)));
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if w::plain_button(ui, tr("Open Full Disk Access settings…")).clicked() {
-                        macpilot::open_full_disk_access_settings();
-                    }
-                    if g.full_disk_access {
-                        w::badge(ui, tr("granted"), C::green());
-                    } else {
-                        w::badge(ui, tr("not granted"), C::yellow());
-                    }
-                });
-            });
-            updates(g, ui);
-            ui.add_space(10.0);
-            ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
-        });
         });
     });
+}
+
+fn general(g: &mut Gui, ui: &mut Ui) {
+    let mut lang_changed = false;
+    row(ui, tr("Language"), tr("Language of the interface. “System” follows macOS."), |ui| {
+        let current = g.settings.lang;
+        let label = current.map(|l| l.native_name()).unwrap_or(tr("System"));
+        egui::ComboBox::from_id_salt("lang").selected_text(label).width(160.0).show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), tr("System")).clicked() {
+                g.settings.lang = None;
+                lang_changed = true;
+            }
+            for l in Lang::ALL {
+                if ui.selectable_label(current == Some(l), l.native_name()).clicked() {
+                    g.settings.lang = Some(l);
+                    lang_changed = true;
+                }
+            }
+        });
+    });
+    if lang_changed {
+        g.language_changed();
+    }
+
+    let mut style = g.settings.style;
+    row(ui, tr("Style"), tr("Classic looks like the first Macintosh: black and white, with a pixel font."), |ui| {
+        w::segmented(ui, &mut style, &[(UiStyle::Standard, tr("Standard")), (UiStyle::Classic, tr("Classic Macintosh"))]);
+    });
+    if style != g.settings.style {
+        g.settings.style = style;
+        g.apply_style();
+        g.save_settings();
+    }
+
+    let mut theme = g.settings.theme;
+    row(ui, tr("Appearance"), "", |ui| {
+        w::segmented(ui, &mut theme, &[(Theme::System, tr("System")), (Theme::Light, tr("Light")), (Theme::Dark, tr("Dark"))]);
+    });
+    if theme != g.settings.theme {
+        g.settings.theme = theme;
+        crate::apply_theme(ui.ctx(), theme);
+        g.save_settings();
+    }
+
+    let mut auto = g.autostart;
+    row(ui, tr("Open at login"), tr("Start MacPilot automatically when you log in."), |ui| {
+        w::switch(ui, &mut auto, tr("Open at login"));
+    });
+    if auto != g.autostart {
+        match autostart::set(auto) {
+            Ok(()) => g.autostart = auto,
+            Err(e) => g.toast(trf("Could not change launch at login: {0}", &[&e]), Level::Danger),
+        }
+    }
+
+    if g.autostart && autostart::needs_approval() {
+        w::note(
+            ui,
+            C::yellow(),
+            tr("Launch at login is switched off in System Settings"),
+            tr("Turn MacPilot on in System Settings → General → Login Items."),
+        );
+        if ui.button(tr("Login Items settings…")).clicked() {
+            crate::mac::open_login_items_settings();
+        }
+    }
+
+    let mut bar = g.settings.menu_bar;
+    row(
+        ui,
+        tr("Show in the menu bar"),
+        tr("CPU and memory at a glance. Closing the window keeps MacPilot there; quit with ⌘Q or from its menu."),
+        |ui| {
+            w::switch(ui, &mut bar, tr("Show in the menu bar"));
+        },
+    );
+    if bar != g.settings.menu_bar {
+        g.settings.menu_bar = bar;
+        g.save_settings();
+    }
+
+    let mut notes = g.settings.notifications;
+    row(
+        ui,
+        tr("Notifications"),
+        tr("Only about real problems: an app stuck in a loop, an almost full disk, a hot battery or an app draining it."),
+        |ui| {
+            w::switch(ui, &mut notes, tr("Notifications"));
+        },
+    );
+    if notes != g.settings.notifications {
+        g.settings.notifications = notes;
+        if notes {
+            crate::mac::init_notifications();
+        }
+        g.save_settings();
+    }
+
+    updates(g, ui);
+}
+
+/// What MacPilot may read, the folders it never opens, and the macOS permissions.
+fn privacy(g: &mut Gui, ui: &mut Ui) {
+    let mut on = g.settings.file_access;
+    row(ui, tr("Read my files"), tr("Disk and Cleanup read the names, sizes and dates of your files — never their contents."), |ui| {
+        w::switch(ui, &mut on, tr("Read my files"));
+    });
+    if on != g.settings.file_access {
+        if on { g.grant_file_access() } else { g.revoke_file_access() }
+    }
+
+    if g.settings.file_access {
+        ui.add_space(8.0);
+        ui.label(RichText::new(tr("Don't scan")).strong());
+        ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).size(12.0).color(C::dim(ui)));
+        ui.add_space(4.0);
+        w::card(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            if crate::access_view::folder_checks(g, ui) {
+                g.exclusions_changed();
+            }
+        });
+        ui.add_space(6.0);
+    }
+
+    ui.add_space(8.0);
+    ui.label(RichText::new(tr("macOS permissions")).strong());
+    ui.add_space(4.0);
+    row(ui, tr("Full Disk Access"), tr("Lets MacPilot see other apps' data too (Docker, virtual machines). Optional."), |ui| {
+        if ui.button(tr("Open…")).clicked() {
+            macpilot::open_full_disk_access_settings();
+        }
+        if g.full_disk_access {
+            w::badge(ui, tr("granted"), C::green());
+        } else {
+            w::badge(ui, tr("not granted"), C::dim(ui));
+        }
+    });
+    row(
+        ui,
+        tr("Files and Folders"),
+        tr("What you allowed when macOS asked about Desktop, Documents and Downloads. Change or take it back there."),
+        |ui| {
+            if ui.button(tr("Open…")).clicked() {
+                macpilot::open_files_and_folders_settings();
+            }
+        },
+    );
+}
+
+fn disk(g: &mut Gui, ui: &mut Ui) {
+    let mut scan = g.settings.scan_on_start;
+    row(ui, tr("Scan the home folder at launch"), tr("Needed for the Overview, Cleanup and “Not used” lists. Runs at low priority."), |ui| {
+        w::switch(ui, &mut scan, tr("Scan the home folder at launch"));
+    });
+    if scan != g.settings.scan_on_start {
+        g.settings.scan_on_start = scan;
+        g.save_settings();
+    }
+
+    let mut stale = g.settings.stale_days;
+    row(ui, tr("“Not used” threshold"), tr("Items not opened or changed for longer than this are listed."), |ui| {
+        w::segmented(ui, &mut stale, &[(90, tr("3 months")), (180, tr("6 months")), (365, tr("1 year")), (730, tr("2 years"))]);
+    });
+    if stale != g.settings.stale_days {
+        g.settings.stale_days = stale;
+        g.stale_days = stale;
+        g.stale_dirty = true;
+        g.save_settings();
+    }
+
+    let mut junk = g.settings.junk_days;
+    row(ui, tr("Inactive project after"), tr("Build folders of projects not changed for this long are pre-selected for removal."), |ui| {
+        w::segmented(ui, &mut junk, &[(7, tr("1 week")), (30, tr("1 month")), (90, tr("3 months")), (365, tr("1 year"))]);
+    });
+    if junk != g.settings.junk_days {
+        g.settings.junk_days = junk;
+        g.junk_dirty = true;
+        g.save_settings();
+    }
+
+    let mut mb = g.settings.dupes_min_mb;
+    row(ui, tr("Duplicates: ignore files smaller than"), "", |ui| {
+        w::segmented(ui, &mut mb, &[(1, "1 MB"), (10, "10 MB"), (100, "100 MB")]);
+    });
+    if mb != g.settings.dupes_min_mb {
+        g.settings.dupes_min_mb = mb;
+        g.save_settings();
+    }
 }
 
 fn updates(g: &mut Gui, ui: &mut Ui) {

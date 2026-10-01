@@ -362,6 +362,28 @@ pub fn is_media(p: &Path) -> bool {
     )
 }
 
+/// Personal folders the user can keep MacPilot out of: (key, path relative to home).
+pub const PERSONAL: &[(&str, &str)] = &[
+    ("Desktop", "Desktop"),
+    ("Documents", "Documents"),
+    ("Downloads", "Downloads"),
+    ("Movies", "Movies"),
+    ("Music", "Music"),
+    ("Pictures", "Pictures"),
+    ("iCloud Drive", "Library/Mobile Documents"),
+];
+
+static EXCLUDED: std::sync::RwLock<Vec<PathBuf>> = std::sync::RwLock::new(Vec::new());
+
+/// Folders MacPilot must never open (chosen in Settings → Privacy).
+pub fn set_excluded(paths: Vec<PathBuf>) {
+    *EXCLUDED.write().unwrap() = paths;
+}
+
+pub fn is_excluded(p: &Path) -> bool {
+    EXCLUDED.read().unwrap().iter().any(|e| p.starts_with(e))
+}
+
 /// Folders of other apps' data (sandbox containers). Since macOS 14 opening some of them waits
 /// for a privacy decision that may never come, which would hang the calling thread forever.
 /// Whether looking at `p` is fine without a macOS dialog: anything inside another app's container
@@ -371,7 +393,7 @@ pub fn reachable(p: &Path) -> bool {
     let inside = ["Library/Containers", "Library/Group Containers"]
         .iter()
         .any(|base| p.strip_prefix(home.join(base)).is_ok_and(|rest| rest.components().count() >= 2));
-    !inside || crate::full_disk_access_cached()
+    !is_excluded(p) && (!inside || crate::full_disk_access_cached())
 }
 
 /// `p` exists and can be looked at without a permission dialog.
@@ -392,6 +414,9 @@ pub fn read_entries(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsStrin
     fn read(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsString, fs::Metadata)>> {
         Ok(fs::read_dir(p)?.flatten().filter_map(|e| e.metadata().ok().map(|m| (e.path(), e.file_name(), m))).collect())
     }
+    if is_excluded(p) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "excluded in MacPilot settings"));
+    }
     if !needs_guard(p) {
         return read(p);
     }
@@ -410,7 +435,8 @@ pub fn read_entries(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsStrin
 }
 
 fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
-    if s.cancel.load(Ordering::Relaxed) {
+    // Excluded folders are skipped quietly (they are not "no access").
+    if s.cancel.load(Ordering::Relaxed) || is_excluded(path) {
         return DirStat::default();
     }
     let rd = match read_entries(path) {
@@ -501,6 +527,9 @@ pub struct Entry {
 
 /// List a folder; folder sizes come from the scan results.
 pub fn list_dir(dir: &Path, scan: Option<&Scan>) -> Result<Vec<Entry>, String> {
+    if is_excluded(dir) {
+        return Err(tr("You excluded this folder in Settings → Privacy, so MacPilot does not open it.").into());
+    }
     let rd = read_entries(dir).map_err(|e| perm_hint(&e))?;
     let dirs = scan.map(|s| s.shared.dirs.lock().unwrap());
     let mut out = Vec::new();
@@ -1030,6 +1059,42 @@ mod tests {
         let s = Scan::load_cache(&home()).expect("run MacPilot once to create the cache");
         let n = s.shared.dirs.lock().unwrap().len();
         println!("{n} folders loaded in {:?}", t.elapsed());
+    }
+
+    /// Excluded folders are never opened: not by the scan, measuring, listing or the duplicate finder.
+    #[test]
+    fn excluded_folders_are_never_opened() {
+        let root = std::env::temp_dir().join(format!("macpilot-excl-{}", std::process::id()));
+        let secret = root.join("secret");
+        std::fs::create_dir_all(&secret).unwrap();
+        std::fs::create_dir_all(root.join("open")).unwrap();
+        std::fs::write(secret.join("diary.txt"), vec![7u8; 200_000]).unwrap();
+        std::fs::write(root.join("open/copy.txt"), vec![7u8; 200_000]).unwrap();
+        std::fs::write(root.join("copy2.txt"), vec![7u8; 200_000]).unwrap();
+        let before = measure(&root).size;
+        set_excluded(vec![secret.clone()]);
+        assert!(read_entries(&secret).is_err());
+        assert!(list_dir(&secret, None).is_err());
+        assert!(!reachable(&secret.join("diary.txt")));
+        assert_eq!(measure(&secret).size, 0);
+        assert!(measure(&root).size < before, "the excluded folder is not counted");
+        // A scan does not count it as "no access" either.
+        let scan = Scan::start(root.clone());
+        while !scan.done() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(scan.shared.errors.load(Ordering::Relaxed), 0);
+        assert!(scan.dir(&secret).is_none());
+        // The duplicate finder sees the two open copies only.
+        let d = crate::dupes::DupScan::start(root.clone(), 100_000);
+        while !d.done() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let groups = d.groups.lock().unwrap().clone();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].files.iter().all(|f| !f.path.starts_with(&secret)));
+        set_excluded(Vec::new());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

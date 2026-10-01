@@ -9,10 +9,15 @@ use egui_extras::{Column, TableBuilder};
 use macpilot::disk::{self, DelSafety};
 use macpilot::{fmt, tr, trf};
 
+use crate::icons;
 use crate::widgets::{self as w, C, Level};
 use crate::{Action, Confirm, DiskMode, Gui};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
+    if !g.settings.file_access {
+        crate::access_view::show(g, ui);
+        return;
+    }
     if !matches!(g.disk_mode, DiskMode::Dupes | DiskMode::Summary) {
         egui::Panel::right("disk_detail").resizable(true).default_size(360.0).min_size(300.0).frame(w::side_frame(ui)).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| detail(g, ui));
@@ -191,7 +196,14 @@ fn heads(h: &mut egui_extras::TableRow, names: &[&str]) {
 fn list(g: &mut Gui, ui: &mut Ui) {
     if let Some(e) = &g.entries_err {
         ui.add_space(20.0);
-        ui.label(RichText::new(trf("Could not open the folder: {0}", &[e])).color(C::red()));
+        if disk::is_excluded(&g.cwd) {
+            ui.label(RichText::new(e).color(C::dim(ui)));
+            if ui.button(tr("Privacy settings…")).clicked() {
+                g.open_privacy();
+            }
+        } else {
+            ui.label(RichText::new(trf("Could not open the folder: {0}", &[e])).color(C::red()));
+        }
         return;
     }
     let total = g.dir_total().max(1);
@@ -224,7 +236,11 @@ fn list(g: &mut Gui, ui: &mut Ui) {
                 row.set_selected(g.disk_sel.as_ref() == Some(&e.path));
                 let (safety, _) = disk::deletion_safety(&e.path);
                 row.col(|ui| {
-                    w::file_icon(ui, e.is_dir, e.name.ends_with(".app"), e.is_link);
+                    if e.name.ends_with(".app") && !e.is_link {
+                        icons::app(ui, &e.path, 18.0);
+                    } else {
+                        w::file_icon(ui, e.is_dir, false, e.is_link);
+                    }
                     let t = RichText::new(&e.name);
                     ui.label(if e.is_dir { t.strong() } else { t });
                 });
@@ -759,7 +775,11 @@ fn stale(g: &mut Gui, ui: &mut Ui) {
 }
 
 pub fn name_with_parent(ui: &mut Ui, p: &Path, is_dir: bool) {
-    w::file_icon(ui, is_dir, p.extension().is_some_and(|e| e == "app"), false);
+    if p.extension().is_some_and(|e| e == "app") {
+        icons::app(ui, p, 18.0);
+    } else {
+        w::file_icon(ui, is_dir, false, false);
+    }
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -938,7 +958,11 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string());
 
     ui.horizontal(|ui| {
-        w::file_icon(ui, is_dir, name.ends_with(".app"), false);
+        if name.ends_with(".app") {
+            icons::app(ui, &path, 32.0);
+        } else {
+            w::file_icon(ui, is_dir, false, false);
+        }
         ui.add(egui::Label::new(RichText::new(&name).size(20.0).strong()).wrap());
     });
     ui.label(RichText::new(fmt::path(&path)).color(C::dim(ui)));
@@ -1008,6 +1032,15 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
             ask_trash(g, &path);
         }
     });
+    if is_dir {
+        ui.add_space(6.0);
+        let r = ui.button(tr("Exclude from MacPilot")).on_hover_text(tr("MacPilot will never open this folder again. Undo in Settings → Privacy."));
+        if r.clicked() {
+            g.settings.set_excluded(&path, true);
+            g.disk_sel = None;
+            g.exclusions_changed();
+        }
+    }
 }
 
 fn legend(ui: &mut Ui) {

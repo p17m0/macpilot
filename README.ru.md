@@ -24,19 +24,27 @@ MacPilot собирает в одном маленьком нативном пр
 <table>
   <tr>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/disk_map_dark.png"><img src="docs/screenshots/disk_map_light.png" alt="Карта диска — что занимает место"></picture></td>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/clean_dark.png"><img src="docs/screenshots/clean_light.png" alt="Очистка — кэши, логи, мусор разработчика"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/battery_dark.png"><img src="docs/screenshots/battery_light.png" alt="Батарея — здоровье, история, расход"></picture></td>
   </tr>
   <tr>
     <td align="center"><sub>Карта диска — что занимает место</sub></td>
-    <td align="center"><sub>Очистка — кэши, логи, мусор разработчика</sub></td>
+    <td align="center"><sub>Батарея — здоровье, история, расход</sub></td>
   </tr>
   <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/clean_dark.png"><img src="docs/screenshots/clean_light.png" alt="Очистка — кэши, логи, мусор разработчика"></picture></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/procs_dark.png"><img src="docs/screenshots/procs_light.png" alt="Процессы по приложениям"></picture></td>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps_dark.png"><img src="docs/screenshots/apps_light.png" alt="Приложения — размер, последний запуск, полное удаление"></picture></td>
   </tr>
   <tr>
+    <td align="center"><sub>Очистка — кэши, логи, мусор разработчика</sub></td>
     <td align="center"><sub>Процессы по приложениям</sub></td>
+  </tr>
+  <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps_dark.png"><img src="docs/screenshots/apps_light.png" alt="Приложения — размер, последний запуск, полное удаление"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/privacy_dark.png"><img src="docs/screenshots/privacy_light.png" alt="Конфиденциальность — папки, которые MacPilot не открывает"></picture></td>
+  </tr>
+  <tr>
     <td align="center"><sub>Приложения — размер, последний запуск, полное удаление</sub></td>
+    <td align="center"><sub>Конфиденциальность — папки, которые MacPilot не открывает</sub></td>
   </tr>
 </table>
 
@@ -60,7 +68,7 @@ MacPilot собирает в одном маленьком нативном пр
 - **Системный мусор**: кэши приложений, журналы, данные Xcode, прошивки iOS, загрузки Почты, кэши менеджеров пакетов (npm, pnpm, Yarn, Cargo, Gradle, Homebrew…). Отсюда же можно очистить Корзину.
 - **Мусор разработчика**: `node_modules`, `target`, `build`, `.venv`, `Pods`, DerivedData и другие, во всех проектах. Видно, когда менялся **сам проект**, поэтому сборки старых проектов легко найти.
 
-**Приложения.** Удаление вместе с файлами в `~/Library`, как в AppCleaner. Также находятся хвосты уже удалённых приложений. Папки, где могут лежать твои документы, помечены и заранее не отмечаются.
+**Приложения.** Удаление вместе с файлами в `~/Library`, как в AppCleaner. Также находятся хвосты уже удалённых приложений — в Application Support, Caches, Containers, Preferences, Logs, WebKit, cookies и других местах, по идентификатору и по имени приложения — и группируются по приложению. Данные Apple, помощники установленных приложений и общие обновляторы не попадают в список; контейнеры, где могут лежать твои документы, помечены.
 
 **Автозагрузка.** Все LaunchAgents и LaunchDaemons: что запускается, кто производитель, работает ли сейчас. Отключение обратимо (`launchctl disable`). Нежелательное ПО и «сломанные» записи помечаются.
 
@@ -98,7 +106,7 @@ MacPilot собирает в одном маленьком нативном пр
 
 1. Возьми `MacPilot-<версия>.dmg` в [Releases](../../releases). Подходит для Apple Silicon и Intel, macOS 12 и новее.
 2. Открой его и перетащи **MacPilot** в **Программы**.
-3. Если релиз собран без Developer ID (см. [docs/RELEASING.md](docs/RELEASING.md)), macOS предупредит о неустановленном разработчике. В первый раз открой приложение через **правый клик → Открыть** или выполни:
+3. Релизы пока не нотаризованы, поэтому при первом запуске появится окно **«MacPilot» не открыт**. Нажми **Готово**, затем открой **Системные настройки → Конфиденциальность и безопасность**, пролистай вниз и нажми **Всё равно открыть** (на macOS 14 и раньше работает и **правый клик → Открыть**). Или один раз выполни:
    ```bash
    xattr -dr com.apple.quarantine /Applications/MacPilot.app
    ```
@@ -124,6 +132,8 @@ cd macpilot
 Скрипт установит `MacPilot.app` в `/Applications`, а команду `macpilot` в `~/.local/bin`.
 
 ## Первый запуск
+
+При первом запуске MacPilot **не читает никаких файлов**: «Процессы», «Батарея», «Приложения» и «Автозагрузка» работают сразу. «Диск» и «Очистка» сначала объясняют, что им нужно (имена, размеры и даты файлов — никогда не содержимое), и спрашивают разрешения. Любую папку — «Рабочий стол», «Загрузки», «Изображения» или любую другую — можно исключить в «Настройках → Конфиденциальность» и передумать там же в любой момент.
 
 Разрешения спрашиваются **один раз** и запоминаются, в том числе после обновлений:
 

@@ -164,12 +164,17 @@ fn report_leftovers() {
     let list = apps::list();
     let orphans = apps::orphans(&list);
     let total: u64 = orphans.iter().map(|o| o.size).sum();
+    let items: usize = orphans.iter().map(|o| o.items.len()).sum();
     println!(
-        "{}\n",
-        trf("{0} of apps that are no longer installed", &[&fmt::n(orphans.len() as u64, fmt::Noun::Folder)]) + &format!(", {}", fmt::bytes(total))
+        "{}, {}\n",
+        trf("{0} of {1} that are no longer installed", &[&fmt::n(items as u64, fmt::Noun::Item), &fmt::n(orphans.len() as u64, fmt::Noun::App)]),
+        fmt::bytes(total)
     );
     for o in &orphans {
-        println!("{:>10}  {:<40} {}", fmt::bytes(o.size), o.id, fmt::path(&o.path));
+        println!("{:>10}  {} ({})", fmt::bytes(o.size), o.name, o.id);
+        for (p, s) in &o.items {
+            println!("{:>12}  {}", s.map(fmt::bytes).unwrap_or_else(|| "?".into()), fmt::path(p));
+        }
     }
 }
 

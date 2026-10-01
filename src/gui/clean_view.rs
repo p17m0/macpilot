@@ -12,6 +12,10 @@ use crate::widgets::{self as w, C, Level};
 use crate::{Action, CleanMode, Confirm, DiskMode, Gui, Page};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
+    if !g.settings.file_access {
+        crate::access_view::show(g, ui);
+        return;
+    }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
             ui.horizontal(|ui| {

@@ -7,6 +7,7 @@ use egui_extras::{Column, TableBuilder};
 use macpilot::apps::AppInfo;
 use macpilot::{disk, fmt, tr, trf};
 
+use crate::icons;
 use crate::widgets::{self as w, C, Level};
 use crate::{Action, AppsMode, Confirm, Gui};
 
@@ -71,7 +72,7 @@ fn installed(g: &mut Gui, ui: &mut Ui) {
                 let a = list[row.index()];
                 row.set_selected(g.app_sel.as_ref() == Some(&a.path));
                 row.col(|ui| {
-                    w::file_icon(ui, true, true, false);
+                    icons::app(ui, &a.path, 24.0);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(RichText::new(&a.name).strong());
@@ -114,7 +115,7 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
         return;
     };
     ui.horizontal(|ui| {
-        w::file_icon(ui, true, true, false);
+        icons::app(ui, &app.path, 40.0);
         ui.label(RichText::new(&app.name).size(22.0).strong());
     });
     ui.label(RichText::new(format!("{} · {}", app.bundle_id, app.version)).color(C::dim(ui)));
@@ -197,38 +198,68 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     }
 }
 
+/// Which places of ~/Library a group of leftovers is in: "Application Support, Caches, Preferences".
+fn places(o: &macpilot::apps::Orphan) -> String {
+    let lib = macpilot::home().join("Library");
+    let mut v: Vec<String> = Vec::new();
+    for (p, _) in &o.items {
+        let place =
+            p.strip_prefix(&lib).ok().and_then(|r| r.components().next()).map(|c| c.as_os_str().to_string_lossy().to_string()).unwrap_or_default();
+        if !place.is_empty() && !v.contains(&place) {
+            v.push(place);
+        }
+    }
+    v.join(", ")
+}
+
 fn leftovers(g: &mut Gui, ui: &mut Ui) {
     let Some(orphans) = g.orphans.clone() else {
         w::waiting(ui, tr("Looking for leftovers…"));
         return;
     };
     let total: u64 = orphans.iter().map(|o| o.size).sum();
-    let checked: Vec<(PathBuf, u64)> = orphans.iter().filter(|o| g.orphans_checked.contains(&o.path)).map(|o| (o.path.clone(), o.size)).collect();
-    let checked_size: u64 = checked.iter().map(|c| c.1).sum();
+    let items: usize = orphans.iter().map(|o| o.items.len()).sum();
+    let chosen: Vec<&macpilot::apps::Orphan> = orphans.iter().filter(|o| g.orphans_checked.contains(o.key())).collect();
+    let chosen_size: u64 = chosen.iter().map(|o| o.size).sum();
+    let all_chosen = !orphans.is_empty() && chosen.len() == orphans.len();
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new(trf("{0} of apps that are no longer installed", &[&fmt::n(orphans.len() as u64, fmt::Noun::Folder)]))
-                        .color(C::dim(ui)),
+                    RichText::new(trf(
+                        "{0} of {1} that are no longer installed",
+                        &[&fmt::n(items as u64, fmt::Noun::Item), &fmt::n(orphans.len() as u64, fmt::Noun::App)],
+                    ))
+                    .color(C::dim(ui)),
                 );
                 ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::yellow()));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if w::big_button(ui, &trf("Move {0} to Trash · {1}", &[&checked.len(), &fmt::bytes(checked_size)]), C::red(), !checked.is_empty())
+                if w::big_button(ui, &trf("Move {0} to Trash · {1}", &[&chosen.len(), &fmt::bytes(chosen_size)]), C::red(), !chosen.is_empty())
                     .clicked()
                 {
-                    let items = checked.iter().map(|(p, s)| (p.clone(), *s, String::new())).collect();
-                    crate::disk_view::ask_trash_many(g, items, "");
+                    let note = tr("may contain your documents");
+                    let list = chosen
+                        .iter()
+                        .flat_map(|o| {
+                            let docs = o.may_hold_documents();
+                            o.items.iter().map(move |(p, s)| (p.clone(), s.unwrap_or(0), if docs { note.to_string() } else { String::new() }))
+                        })
+                        .collect();
+                    crate::disk_view::ask_trash_many(g, list, "{0}");
                 }
-                if w::plain_button(ui, tr("Select all")).on_hover_text(tr("Folders that may contain your documents are not selected")).clicked() {
-                    g.orphans_checked = orphans.iter().filter(|o| !o.may_hold_documents()).map(|o| o.path.clone()).collect();
+                if all_chosen {
+                    if w::plain_button(ui, tr("Deselect all")).clicked() {
+                        g.orphans_checked.clear();
+                    }
+                } else if w::plain_button(ui, tr("Select all")).clicked() {
+                    g.orphans_checked = orphans.iter().map(|o| o.key().to_path_buf()).collect();
                 }
             });
         });
         ui.label(
-            RichText::new(tr("Found by bundle id in Containers, Application Support, Caches and Saved Application State. Apple's own data and data of installed apps are skipped. Check the list: a few helpers live outside the Applications folder."))
+            RichText::new(tr("Found by bundle id in every place apps keep data in your Library (Containers, Application Support, Caches, Logs, Preferences, WebKit, cookies…) and by the app's name. Apple's data, installed apps and their helpers are skipped."))
                 .size(11.5)
                 .color(C::dim(ui)),
         );
@@ -245,7 +276,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::exact(28.0))
         .column(Column::remainder().at_least(260.0).clip(true))
-        .column(Column::exact(86.0))
+        .column(Column::exact(96.0))
         .column(Column::exact(140.0))
         .header(24.0, |mut h| {
             for t in ["", tr("Belonged to"), tr("Size"), tr("Changed")] {
@@ -255,38 +286,47 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
             }
         })
         .body(|body| {
-            body.rows(34.0, orphans.len(), |mut row| {
+            body.rows(40.0, orphans.len(), |mut row| {
                 let o = &orphans[row.index()];
                 row.col(|ui| {
-                    let mut on = g.orphans_checked.contains(&o.path);
+                    let mut on = g.orphans_checked.contains(o.key());
                     if ui.checkbox(&mut on, "").changed() {
-                        toggle = Some(o.path.clone());
+                        toggle = Some(o.key().to_path_buf());
                     }
                 });
                 row.col(|ui| {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&o.id).strong());
+                            ui.label(RichText::new(&o.name).strong());
+                            ui.label(RichText::new(&o.id).size(11.0).color(C::dim(ui)));
                             if o.may_hold_documents() {
                                 w::badge(ui, tr("may contain your documents"), C::yellow())
                                     .on_hover_text(tr("Sandboxed apps keep files you created (images, projects, notes) inside their container. Look inside before removing."));
                             }
                         });
-                        ui.label(RichText::new(fmt::path(&o.path)).size(11.0).color(C::dim(ui)));
+                        let all: Vec<String> = o.items.iter().map(|(p, _)| fmt::path(p)).collect();
+                        ui.label(RichText::new(format!("{} · {}", fmt::n(o.items.len() as u64, fmt::Noun::Item), places(o))).size(11.0).color(C::dim(ui)))
+                            .on_hover_text(all.join("\n"));
                     });
                 });
                 row.col(|ui| {
-                    ui.label(RichText::new(fmt::bytes(o.size)).color(w::size_color(ui, o.size)));
+                    if o.size_unknown() && o.size == 0 {
+                        ui.label(RichText::new(tr("unknown")).color(C::dim(ui))).on_hover_text(tr("Inside another app's container: macOS shows its size only with Full Disk Access."));
+                    } else {
+                        ui.label(RichText::new(fmt::bytes(o.size)).color(w::size_color(ui, o.size)));
+                    }
                 });
                 row.col(|ui| {
-                    let m = std::fs::symlink_metadata(&o.path).ok().map(|m| std::os::unix::fs::MetadataExt::mtime(&m));
+                    let m = o.items.iter().filter_map(|(p, _)| std::fs::symlink_metadata(p).ok()).map(|m| std::os::unix::fs::MetadataExt::mtime(&m)).max();
                     w::time_cell(ui, m);
                 });
                 row.response().context_menu(|ui| {
-                    if ui.button(tr("Show in Finder")).clicked() {
-                        macpilot::trash::reveal_in_finder(&o.path);
-                        ui.close();
+                    for (p, _) in &o.items {
+                        if ui.button(trf("Show {0} in Finder", &[&fmt::path(p)])).clicked() {
+                            macpilot::trash::reveal_in_finder(p);
+                            ui.close();
+                        }
                     }
                 });
             });

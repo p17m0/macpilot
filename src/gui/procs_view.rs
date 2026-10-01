@@ -8,6 +8,7 @@ use egui_extras::{Column, TableBuilder};
 use macpilot::procs::{self, AppGroup, ProcInfo, Safety, Snapshot};
 use macpilot::{fmt, tr, trf};
 
+use crate::icons;
 use crate::widgets::{self as w, C, Level};
 use crate::{Action, Confirm, DiskMode, Gui, Page, ProcView, Sel, SortKey};
 
@@ -212,7 +213,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 let sel = Sel::Group(gr.key.clone());
                 row.set_selected(g.sel.as_ref() == Some(&sel));
                 row.col(|ui| {
-                    w::dot(ui, if gr.app.is_some() { C::accent() } else { C::track(ui) });
+                    icons::process(ui, gr.app.as_deref(), 18.0);
                     ui.label(RichText::new(&gr.label).color(C::text(ui)));
                     if gr.pids.iter().any(|p| ports.contains_key(p)) {
                         w::badge(ui, tr("network"), C::purple());
@@ -244,6 +245,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                         ui.add_space((*depth as f32 * 14.0).min(200.0));
                         ui.label(RichText::new("└").color(C::dim(ui)));
                     }
+                    icons::process(ui, p.app.as_deref(), 18.0);
                     ui.label(RichText::new(&p.name).color(C::text(ui)));
                     if ports.contains_key(pid) {
                         w::badge(ui, tr("network"), C::purple());
@@ -447,7 +449,10 @@ fn ports_block(g: &Gui, ui: &mut Ui, pids: &[u32]) {
 }
 
 fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
-    ui.label(RichText::new(&gr.label).size(22.0).strong());
+    ui.horizontal(|ui| {
+        icons::process(ui, gr.app.as_deref(), 32.0);
+        ui.label(RichText::new(&gr.label).size(22.0).strong());
+    });
     let kind = if gr.app.is_some() { tr("App") } else { tr("Program") };
     ui.label(RichText::new(format!("{kind} · {}", fmt::n(gr.pids.len() as u64, fmt::Noun::Process))).color(C::dim(ui)));
     ui.add_space(6.0);
@@ -512,7 +517,10 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
 }
 
 fn proc_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, p: &ProcInfo) {
-    ui.label(RichText::new(&p.name).size(22.0).strong());
+    ui.horizontal(|ui| {
+        icons::process(ui, p.app.as_deref(), 32.0);
+        ui.label(RichText::new(&p.name).size(22.0).strong());
+    });
     ui.label(RichText::new(format!("PID {} · {} · {}", p.pid, p.user, trf("running for {0}", &[&fmt::duration(p.run_time)]))).color(C::dim(ui)));
     ui.add_space(6.0);
     ui.label(procs::describe(p));

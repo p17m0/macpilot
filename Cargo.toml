@@ -46,8 +46,8 @@ egui_extras = { version = "0.36", default-features = false, optional = true }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 objc2 = { version = "0.6", optional = true }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSThread", "NSArray", "NSEnumerator", "NSError"], optional = true }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSStatusBar", "NSStatusItem", "NSMenu", "NSMenuItem", "NSButton", "NSControl", "NSView", "NSResponder", "NSWindow", "NSStatusBarButton", "NSRunningApplication", "NSFont", "NSAttributedString", "NSGraphics", "NSImage"], optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSThread", "NSArray", "NSEnumerator", "NSError", "NSURL", "NSGeometry"], optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSStatusBar", "NSStatusItem", "NSMenu", "NSMenuItem", "NSButton", "NSControl", "NSView", "NSResponder", "NSWindow", "NSStatusBarButton", "NSRunningApplication", "NSFont", "NSAttributedString", "NSGraphics", "NSImage", "NSOpenPanel", "NSSavePanel", "NSPanel", "NSWorkspace", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext"], optional = true }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"], optional = true }
 block2 = { version = "0.6", optional = true }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotification", "UNNotificationTrigger", "UNNotificationSettings"], optional = true }

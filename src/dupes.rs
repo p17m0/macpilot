@@ -104,7 +104,7 @@ fn skip(p: &Path, home: &Path) -> bool {
 type Listing = Mutex<Vec<(u64, PathBuf, i64, (u64, u64))>>;
 
 fn list(s: &DupScan, dir: &Path, min: u64, home: &Path, out: &Listing) {
-    if s.cancel.load(Ordering::Relaxed) {
+    if s.cancel.load(Ordering::Relaxed) || crate::disk::is_excluded(dir) {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else { return };
