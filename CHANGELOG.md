@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.5
 
 - **Nothing is read before you agree.** On the first launch MacPilot looks at no files: Processes, Battery, Apps and Startup work right away, and Disk and Cleanup first explain what they read (names, sizes and dates — never contents) and ask. Settings → Privacy can turn it off again.
 - **Folders MacPilot never opens** (Settings → Privacy → Don't scan): switch on Desktop, Documents, Downloads, Movies, Music, Pictures or iCloud Drive, add any other folder, or use "Exclude from MacPilot" on the Disk page. They are never opened — not by the scan, the duplicate finder or cleanup.

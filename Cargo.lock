@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "macpilot"
-version = "0.5.0"
+version = "0.5.5"
 dependencies = [
  "block2 0.6.2",
  "eframe",
