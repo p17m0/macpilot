@@ -1,16 +1,7 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
-- **Nothing is read before you agree.** On the first launch MacPilot looks at no files: Processes, Battery, Apps and Startup work right away, and Disk and Cleanup first explain what they read (names, sizes and dates — never contents) and ask. Settings → Privacy can turn it off again.
-- **Folders MacPilot never opens** (Settings → Privacy → Don't scan): switch on Desktop, Documents, Downloads, Movies, Music, Pictures or iCloud Drive, add any other folder, or use "Exclude from MacPilot" on the Disk page. They are never opened — not by the scan, the duplicate finder or cleanup.
-- The notification permission is asked with the first real notification, not at launch.
-- **Settings in tabs**: General, Privacy, Disk and Cleanup. Privacy has a "Don't scan" list — the standard folders with a switch each, and your own folders with "Add folder…".
-- **Leftovers of removed apps, found much more completely**: 13 places of `~/Library` (Containers, Group Containers, Application Support, Application Scripts, Caches, Logs, Preferences and ByHost, Saved Application State, HTTPStorages, WebKit, Cookies, background downloads), by bundle id and by the app's name ("Application Support/Kiro"). Grouped per app, with helpers such as auto-updaters merged in. Sizes inside other apps' containers show as unknown without Full Disk Access instead of being dropped. Apple's data, Homebrew services and updaters shared with installed apps (Google Keystone, Microsoft AutoUpdate) are not listed. "Select all" selects everything and turns into "Deselect all".
-- Uninstalling an app uses the same places and the same name matching.
-- Tests for excluded folders (scan, measuring, listing, duplicates) and for the leftover search.
-- README: how to open a non-notarized release on macOS 15 and later (right-click → Open no longer skips the warning).
-- **Real app icons** in Apps, Processes and on the Disk page, as in Finder (grey in the Classic style). Processes that are not apps get the Unix executable icon.
 - **Design pass** after the Macintosh classics (Tognazzini's guidelines, Atkinson's pixels, Kare's icons):
   - **Type**: real weights of San Francisco — Bold page titles, Semibold headings and names (egui's "strong" only changed the color). Small text uses SF Text instead of the tighter Display cut, SF Mono replaces the light default monospace, body text is 13 pt and darker. One scale of seven sizes instead of sixteen; Classic gets a bold pixel font too.
   - **Spacing** on a 4-point grid; wider page margins; table rows 28 pt (44 pt with two lines).
@@ -21,6 +12,18 @@
   - **Disk → Summary**: gaps between the parts of the bar; pointing at a part lights up its line and back; what MacPilot cannot see is hatched instead of red. "What changed" shows the folder's name first.
   - **Icons**: a new sidebar set on one grid with filled variants for the selected page; Cleanup cards show the app they belong to (Xcode, Mail, Docker…) or the folder; a small pixel computer for empty and all-good states.
   - Same-height cards on the Overview, sparklines with a baseline, `commands` in SF Mono, percentages spaced as each language wants, and MacPilot no longer advises quitting itself for its energy use.
+
+## 0.5.5
+
+- **Nothing is read before you agree.** On the first launch MacPilot looks at no files: Processes, Battery, Apps and Startup work right away, and Disk and Cleanup first explain what they read (names, sizes and dates — never contents) and ask. Settings → Privacy can turn it off again.
+- **Folders MacPilot never opens** (Settings → Privacy → Don't scan): switch on Desktop, Documents, Downloads, Movies, Music, Pictures or iCloud Drive, add any other folder, or use "Exclude from MacPilot" on the Disk page. They are never opened — not by the scan, the duplicate finder or cleanup.
+- The notification permission is asked with the first real notification, not at launch.
+- **Settings in tabs**: General, Privacy, Disk and Cleanup. Privacy has a "Don't scan" list — the standard folders with a switch each, and your own folders with "Add folder…".
+- **Leftovers of removed apps, found much more completely**: 13 places of `~/Library` (Containers, Group Containers, Application Support, Application Scripts, Caches, Logs, Preferences and ByHost, Saved Application State, HTTPStorages, WebKit, Cookies, background downloads), by bundle id and by the app's name ("Application Support/Kiro"). Grouped per app, with helpers such as auto-updaters merged in. Sizes inside other apps' containers show as unknown without Full Disk Access instead of being dropped. Apple's data, Homebrew services and updaters shared with installed apps (Google Keystone, Microsoft AutoUpdate) are not listed. "Select all" selects everything and turns into "Deselect all".
+- Uninstalling an app uses the same places and the same name matching.
+- Tests for excluded folders (scan, measuring, listing, duplicates) and for the leftover search.
+- README: how to open a non-notarized release on macOS 15 and later (right-click → Open no longer skips the warning).
+- **Real app icons** in Apps, Processes and on the Disk page, as in Finder (grey in the Classic style). Processes that are not apps get the Unix executable icon.
 
 ## 0.5.0
 
