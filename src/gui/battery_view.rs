@@ -47,56 +47,58 @@ fn power_text(b: &Battery) -> (String, String) {
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     let info = g.power.lock().unwrap().clone();
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            let Some(b) = info.battery().cloned() else {
-                w::header(ui, tr("Battery"), "");
-                w::empty(ui, tr("This Mac has no battery."));
-                return;
-            };
-            let (pct, state) = short_state(&b);
-            w::header(ui, tr("Battery"), &format!("{pct} · {state}"));
+        w::centered(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                let Some(b) = info.battery().cloned() else {
+                    w::header(ui, tr("Battery"), "");
+                    w::empty(ui, tr("This Mac has no battery."));
+                    return;
+                };
+                let (pct, state) = short_state(&b);
+                w::header(ui, tr("Battery"), &format!("{pct} · {state}"));
 
-            ui.columns(4, |cols| {
-                let low = 1.0 - b.percent as f32 / 100.0;
-                let sub = if b.low_power_mode { tr("Low Power Mode is on").to_string() } else { state.clone() };
-                stat_card(&mut cols[0], tr("Charge"), pct.clone(), sub, low, None);
-                let (value, sub) = power_text(&b);
-                let heavy = if !b.plugged && -b.watts > 25.0 { 0.8 } else { 0.1 };
-                stat_card(&mut cols[1], tr("Power"), value, sub, heavy, None);
-                let health = b.health_pct();
-                let condition = match b.condition.as_deref() {
-                    Some("Good" | "Normal") | None => tr("normal").to_string(),
-                    Some(other) => other.to_string(),
-                };
-                stat_card(
-                    &mut cols[2],
-                    tr("Health"),
-                    health.map(|h| format!("{h}%")).unwrap_or("—".into()),
-                    trf("{0} · {1} of {2} cycles", &[&condition, &b.cycles, &RATED_CYCLES]),
-                    if b.needs_service() { 0.95 } else { 0.1 },
-                    None,
-                );
-                let hot = if b.temperature >= 40.0 {
-                    0.95
-                } else if b.temperature >= 35.0 {
-                    0.8
-                } else {
-                    0.1
-                };
-                stat_card(&mut cols[3], tr("Temperature"), fmt::celsius(b.temperature), tr("of the battery").into(), hot, None);
+                ui.columns(4, |cols| {
+                    let low = 1.0 - b.percent as f32 / 100.0;
+                    let sub = if b.low_power_mode { tr("Low Power Mode is on").to_string() } else { state.clone() };
+                    stat_card(&mut cols[0], tr("Charge"), pct.clone(), sub, low, None);
+                    let (value, sub) = power_text(&b);
+                    let heavy = if !b.plugged && -b.watts > 25.0 { 0.8 } else { 0.1 };
+                    stat_card(&mut cols[1], tr("Power"), value, sub, heavy, None);
+                    let health = b.health_pct();
+                    let condition = match b.condition.as_deref() {
+                        Some("Good" | "Normal") | None => tr("normal").to_string(),
+                        Some(other) => other.to_string(),
+                    };
+                    stat_card(
+                        &mut cols[2],
+                        tr("Health"),
+                        health.map(|h| format!("{h}%")).unwrap_or("—".into()),
+                        trf("{0} · {1} of {2} cycles", &[&condition, &b.cycles, &RATED_CYCLES]),
+                        if b.needs_service() { 0.95 } else { 0.1 },
+                        None,
+                    );
+                    let hot = if b.temperature >= 40.0 {
+                        0.95
+                    } else if b.temperature >= 35.0 {
+                        0.8
+                    } else {
+                        0.1
+                    };
+                    stat_card(&mut cols[3], tr("Temperature"), fmt::celsius(b.temperature), tr("of the battery").into(), hot, None);
+                });
+
+                ui.add_space(10.0);
+                advice(g, ui, &b);
+
+                ui.add_space(14.0);
+                history(g, ui);
+
+                ui.add_space(14.0);
+                energy_users(g, ui, &b);
+
+                ui.add_space(14.0);
+                awake(g, ui, &info.blockers);
             });
-
-            ui.add_space(10.0);
-            advice(g, ui, &b);
-
-            ui.add_space(14.0);
-            history(g, ui);
-
-            ui.add_space(14.0);
-            energy_users(g, ui, &b);
-
-            ui.add_space(14.0);
-            awake(g, ui, &info.blockers);
         });
     });
 }
@@ -107,7 +109,7 @@ fn advice(g: &mut Gui, ui: &mut Ui, b: &Battery) {
         let h = b.health_pct().map(|h| format!("{h}%")).unwrap_or_default();
         w::note(
             ui,
-            C::RED,
+            C::red(),
             tr("The battery needs service"),
             &trf("Its maximum capacity is {0} of new. Below 80% macOS recommends replacing it; the Mac lasts noticeably less on a charge.", &[&h]),
         );
@@ -116,7 +118,7 @@ fn advice(g: &mut Gui, ui: &mut Ui, b: &Battery) {
     if b.temperature >= 40.0 {
         w::note(
             ui,
-            C::YELLOW,
+            C::yellow(),
             &trf("The battery is hot: {0}", &[&fmt::celsius(b.temperature)]),
             tr("Heat wears batteries fastest. Heavy apps, charging on a soft surface or in the sun make it worse."),
         );
@@ -125,7 +127,7 @@ fn advice(g: &mut Gui, ui: &mut Ui, b: &Battery) {
     if b.cycles >= RATED_CYCLES * 9 / 10 {
         w::note(
             ui,
-            C::YELLOW,
+            C::yellow(),
             &trf("{0} charge cycles", &[&b.cycles]),
             &trf("The battery is rated for {0} cycles. Expect it to hold less charge from now on.", &[&RATED_CYCLES]),
         );
@@ -134,7 +136,7 @@ fn advice(g: &mut Gui, ui: &mut Ui, b: &Battery) {
     if !b.plugged && b.percent <= 20 && !b.low_power_mode {
         w::note(
             ui,
-            C::YELLOW,
+            C::yellow(),
             tr("Low battery"),
             tr("Low Power Mode makes the charge last longer: macOS slows the processor a little and dims the screen."),
         );
@@ -223,15 +225,15 @@ fn history(g: &mut Gui, ui: &mut Ui) {
                 p.rect_filled(
                     Rect::from_min_max(Pos2::new(x(a.ts), plot.top()), Pos2::new(x(b.ts), plot.bottom())),
                     0,
-                    C::GREEN.gamma_multiply(0.10),
+                    C::green().gamma_multiply(0.10),
                 );
             }
             let color = if a.percent <= 20 {
-                C::RED
+                C::red()
             } else if a.plugged {
-                C::GREEN
+                C::green()
             } else {
-                C::ACCENT
+                C::accent()
             };
             p.line_segment([Pos2::new(x(a.ts), y(a.percent)), Pos2::new(x(b.ts), y(b.percent))], Stroke::new(2.0, color));
         }
@@ -246,8 +248,8 @@ fn history(g: &mut Gui, ui: &mut Ui) {
             }
         }
         ui.horizontal(|ui| {
-            legend(ui, C::ACCENT, tr("on battery"));
-            legend(ui, C::GREEN, tr("on power adapter"));
+            legend(ui, C::accent(), tr("on battery"));
+            legend(ui, C::green(), tr("on power adapter"));
         });
     });
 }
@@ -289,11 +291,11 @@ fn energy_users(g: &mut Gui, ui: &mut Ui, b: &Battery) {
                     open = Some(gr.key.clone());
                 }
                 let color = if watts >= 4.0 {
-                    C::RED
+                    C::red()
                 } else if watts >= 1.0 {
-                    C::YELLOW
+                    C::yellow()
                 } else {
-                    C::GREEN
+                    C::green()
                 };
                 w::bar(ui, watts / max, Vec2::new((ui.available_width() - 90.0).max(60.0), 8.0), color);
                 ui.label(RichText::new(fmt::watts(watts)).color(color));
@@ -322,7 +324,7 @@ fn awake(g: &mut Gui, ui: &mut Ui, blockers: &[battery::SleepBlocker]) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&name).strong());
                 if bl.display {
-                    w::badge(ui, tr("keeps the display on"), C::YELLOW);
+                    w::badge(ui, tr("keeps the display on"), C::yellow());
                 }
                 ui.label(RichText::new(trf("for {0}", &[&fmt::duration(bl.seconds)])).color(C::dim(ui)));
                 if let Some(why) = reason_text(&bl.reason) {

@@ -17,16 +17,18 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         });
     }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("Apps")).size(24.0).strong());
-            ui.add_space(12.0);
-            w::segmented(ui, &mut g.apps_mode, &[(AppsMode::Installed, tr("Installed")), (AppsMode::Leftovers, tr("Leftovers of removed apps"))]);
+        w::centered(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tr("Apps")).size(24.0).strong());
+                ui.add_space(12.0);
+                w::segmented(ui, &mut g.apps_mode, &[(AppsMode::Installed, tr("Installed")), (AppsMode::Leftovers, tr("Leftovers of removed apps"))]);
+            });
+            ui.add_space(8.0);
+            match g.apps_mode {
+                AppsMode::Installed => installed(g, ui),
+                AppsMode::Leftovers => leftovers(g, ui),
+            }
         });
-        ui.add_space(8.0);
-        match g.apps_mode {
-            AppsMode::Installed => installed(g, ui),
-            AppsMode::Leftovers => leftovers(g, ui),
-        }
     });
 }
 
@@ -85,7 +87,7 @@ fn installed(g: &mut Gui, ui: &mut Ui) {
                 row.col(|ui| w::time_cell(ui, a.last_used));
                 row.col(|ui| {
                     if macpilot::apps::is_running(&a.path, &snap) {
-                        w::badge(ui, tr("running"), C::GREEN);
+                        w::badge(ui, tr("running"), C::green());
                     } else if a.protected {
                         w::badge(ui, tr("built-in"), C::dim(ui));
                     }
@@ -128,11 +130,11 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     });
     if let Some(t) = app.last_used.filter(|t| disk::now_unix() - t > 180 * 86_400) {
         ui.add_space(8.0);
-        w::note(ui, C::YELLOW, &trf("Not opened for {0}", &[&fmt::age_in(t)]), tr("If you no longer use it, uninstall it together with its data."));
+        w::note(ui, C::yellow(), &trf("Not opened for {0}", &[&fmt::age_in(t)]), tr("If you no longer use it, uninstall it together with its data."));
     }
     ui.add_space(10.0);
     if app.protected {
-        w::note(ui, C::RED, tr("Built into macOS"), tr("This app is part of the system and cannot be removed."));
+        w::note(ui, C::red(), tr("Built into macOS"), tr("This app is part of the system and cannot be removed."));
         return;
     }
     let running = macpilot::apps::is_running(&app.path, &g.snap);
@@ -142,7 +144,7 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     }
     let size: u64 = chosen.iter().map(|c| c.1).sum();
     ui.horizontal_wrapped(|ui| {
-        let r = w::big_button(ui, &trf("Uninstall · {0}", &[&fmt::bytes(size)]), C::RED, !running)
+        let r = w::big_button(ui, &trf("Uninstall · {0}", &[&fmt::bytes(size)]), C::red(), !running)
             .on_disabled_hover_text(tr("Quit the app first (Processes page)."));
         if r.clicked() {
             let mut lines =
@@ -162,7 +164,7 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
         }
     });
     if running {
-        ui.label(RichText::new(tr("The app is running — quit it before uninstalling.")).color(C::YELLOW));
+        ui.label(RichText::new(tr("The app is running — quit it before uninstalling.")).color(C::yellow()));
     }
     ui.add_space(12.0);
     ui.label(RichText::new(tr("Files it keeps in your Library")).strong());
@@ -211,10 +213,10 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                     RichText::new(trf("{0} of apps that are no longer installed", &[&fmt::n(orphans.len() as u64, fmt::Noun::Folder)]))
                         .color(C::dim(ui)),
                 );
-                ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::YELLOW));
+                ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::yellow()));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if w::big_button(ui, &trf("Move {0} to Trash · {1}", &[&checked.len(), &fmt::bytes(checked_size)]), C::RED, !checked.is_empty())
+                if w::big_button(ui, &trf("Move {0} to Trash · {1}", &[&checked.len(), &fmt::bytes(checked_size)]), C::red(), !checked.is_empty())
                     .clicked()
                 {
                     let items = checked.iter().map(|(p, s)| (p.clone(), *s, String::new())).collect();
@@ -267,7 +269,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&o.id).strong());
                             if o.may_hold_documents() {
-                                w::badge(ui, tr("may contain your documents"), C::YELLOW)
+                                w::badge(ui, tr("may contain your documents"), C::yellow())
                                     .on_hover_text(tr("Sandboxed apps keep files you created (images, projects, notes) inside their container. Look inside before removing."));
                             }
                         });

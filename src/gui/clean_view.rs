@@ -13,16 +13,18 @@ use crate::{Action, CleanMode, Confirm, DiskMode, Gui, Page};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("Cleanup")).size(24.0).strong());
-            ui.add_space(12.0);
-            w::segmented(ui, &mut g.clean_mode, &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk"))]);
+        w::centered(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tr("Cleanup")).size(24.0).strong());
+                ui.add_space(12.0);
+                w::segmented(ui, &mut g.clean_mode, &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk"))]);
+            });
+            ui.add_space(8.0);
+            match g.clean_mode {
+                CleanMode::System => system(g, ui),
+                CleanMode::Dev => dev(g, ui),
+            }
         });
-        ui.add_space(8.0);
-        match g.clean_mode {
-            CleanMode::System => system(g, ui),
-            CleanMode::Dev => dev(g, ui),
-        }
     });
 }
 
@@ -33,7 +35,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.label(RichText::new(tr("Can be freed safely")).color(C::dim(ui)));
             ui.horizontal(|ui| {
-                ui.label(RichText::new(fmt::bytes(safe_total)).size(30.0).strong().color(C::GREEN));
+                ui.label(RichText::new(fmt::bytes(safe_total)).size(30.0).strong().color(C::green()));
                 if measuring {
                     ui.spinner();
                 }
@@ -110,7 +112,7 @@ fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
                     w::del_badge(ui, clean::target_safety(t));
                 }
                 Kind::Manual => {
-                    w::badge(ui, tr("by hand"), C::YELLOW);
+                    w::badge(ui, tr("by hand"), C::yellow());
                 }
                 Kind::Trash => {}
             });
@@ -129,19 +131,19 @@ fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
             let has = exists && t.stat.is_some_and(|s| s.size > 0);
             match t.kind {
                 Kind::Clean => {
-                    if w::big_button(ui, tr("Clean"), C::GREEN, has).clicked() {
+                    if w::big_button(ui, tr("Clean"), C::green(), has).clicked() {
                         out = Some(CardAction::Clean);
                     }
                 }
                 Kind::Trash => {
-                    if w::big_button(ui, tr("Empty Trash…"), C::RED, has).clicked() {
+                    if w::big_button(ui, tr("Empty Trash…"), C::red(), has).clicked() {
                         out = Some(CardAction::EmptyTrash);
                     }
                 }
                 Kind::Manual => {}
             }
             if t.kind != Kind::Trash
-                && ui.add_enabled(exists, egui::Button::new(tr("Open")).corner_radius(8).min_size(egui::vec2(0.0, 32.0))).clicked()
+                && ui.add_enabled(exists, egui::Button::new(tr("Open")).corner_radius(w::button_radius()).min_size(egui::vec2(0.0, 32.0))).clicked()
             {
                 out = Some(CardAction::Open);
             }
@@ -204,7 +206,7 @@ pub fn partial_note(g: &Gui, ui: &mut Ui) {
     if g.scan.as_ref().is_some_and(|s| !s.done()) {
         w::note(
             ui,
-            C::YELLOW,
+            C::yellow(),
             tr("Partial results"),
             tr("The scan is waiting for a macOS permission dialog. Answer it, or give MacPilot Full Disk Access — the list will be completed."),
         );
@@ -232,7 +234,7 @@ fn stale_banner(g: &mut Gui, ui: &mut Ui) {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if w::big_button(ui, tr("Review"), C::ACCENT, true).clicked() {
+                if w::big_button(ui, tr("Review"), C::accent(), true).clicked() {
                     open = true;
                 }
             });
@@ -281,11 +283,11 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                     RichText::new(trf("{1}: {0}, {2} in total", &[&fmt::n(g.junk.len() as u64, fmt::Noun::BuildFolder), &root, &fmt::bytes(total)]))
                         .color(C::dim(ui)),
                 );
-                ui.label(RichText::new(trf("{0} in inactive projects", &[&fmt::bytes(old)])).size(24.0).strong().color(C::GREEN));
+                ui.label(RichText::new(trf("{0} in inactive projects", &[&fmt::bytes(old)])).size(24.0).strong().color(C::green()));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let label = trf("Move {0} to Trash · {1}", &[&checked.len(), &fmt::bytes(checked_size)]);
-                if w::big_button(ui, &label, C::RED, !checked.is_empty()).clicked() {
+                if w::big_button(ui, &label, C::red(), !checked.is_empty()).clicked() {
                     let size = checked_size;
                     let paths: Vec<PathBuf> = checked.iter().map(|c| c.0.clone()).collect();
                     let lines = vec![
@@ -357,7 +359,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                 });
                 row.col(|ui| {
                     let inactive = j.project_modified < cutoff;
-                    ui.label(RichText::new(fmt::ago(j.project_modified)).color(if inactive { C::GREEN } else { C::dim(ui) })).on_hover_text(
+                    ui.label(RichText::new(fmt::ago(j.project_modified)).color(if inactive { C::green() } else { C::dim(ui) })).on_hover_text(
                         if inactive {
                             tr("Inactive project — its build is safe to remove")
                         } else {

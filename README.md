@@ -49,6 +49,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 **Battery.** Charge, time left and the power being drawn right now; health and cycles as System Settings reports them; temperature; a 24-hour and 7-day charge history with the average drain per hour. It lists the apps using energy now (in watts) and what keeps the Mac awake, and warns when the battery needs service or runs hot. The Processes page has an *Energy* column too.
 
 **Disk.**
+- **Summary**: the whole disk in one bar (your files, apps and other folders, macOS, swap, free, and what is hidden without Full Disk Access), plus what grew or shrank over the last day, week or month.
 - **List**: sizes, share of the folder, *Modified* and *Opened* dates.
 - **Map**: a treemap, like DaisyDisk.
 - **Large files**: everything from 50 MB.
@@ -69,7 +70,9 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Fast start.** The last scan of your home folder is saved (a compact ~7 MB cache), so results appear instantly at launch while a fresh scan runs in the background.
 
-**Settings.** Language (English, Français, Español, Deutsch, Русский), appearance, open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
+**Settings.** Style (standard or Classic Macintosh, each light or dark), language (English, Français, Español, Deutsch, Русский), appearance, open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
+
+**Notifications.** Only for real problems: an app stuck spawning hundreds of processes, a nearly full disk, a hot battery, or an app draining the battery. A click opens the right page; you can turn them off in Settings.
 
 **Updates.** Once a day MacPilot asks GitHub for the latest release and shows a note in Settings. Nothing else is sent, and you can turn it off.
 

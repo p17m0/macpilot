@@ -43,6 +43,16 @@ pub enum Page {
     Settings,
 }
 
+/// Disk volumes and big folders outside the home folder, gathered in the background.
+#[derive(Clone, Default)]
+pub struct SpaceInfo {
+    pub volumes: Option<macpilot::space::Volumes>,
+    pub snapshots: Vec<String>,
+    /// Folders outside the home folder: (path, kind, size once measured).
+    pub outside: Vec<(PathBuf, &'static str, Option<u64>)>,
+    pub measuring: bool,
+}
+
 /// Battery state, refreshed in the background.
 #[derive(Clone, Default)]
 pub struct PowerInfo {
@@ -76,6 +86,7 @@ pub enum SortKey {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DiskMode {
+    Summary,
     List,
     Map,
     Big,
@@ -174,6 +185,10 @@ pub struct Gui {
     last_battery_sample: Option<(i64, bool)>,
 
     // Disk
+    pub space: Arc<Mutex<SpaceInfo>>,
+    /// "What changed" period, days, and the result: (baseline time, changes).
+    pub changes_days: i64,
+    pub changes: Option<(Option<i64>, Vec<macpilot::space::Change>)>,
     pub scan: Option<Scan>,
     /// Fresh scan running in the background while `scan` shows cached results.
     pub rescan: Option<Scan>,
@@ -221,6 +236,9 @@ pub struct Gui {
     pub full_disk_access: bool,
     /// Menu bar item: when it was last updated.
     last_status: Option<Instant>,
+    /// Notifications: when each kind was last sent, and when the rules last ran.
+    notified: HashMap<String, Instant>,
+    last_alert_check: Instant,
     /// Update check: a newer release, the last error, and when it last ran.
     pub update: Option<macpilot::update::Release>,
     pub update_error: Option<String>,
@@ -251,7 +269,7 @@ impl Gui {
             Some(l) => macpilot::i18n::set_lang(l),
             None => settings.apply_lang(),
         }
-        widgets::setup_style(&cc.egui_ctx);
+        widgets::setup_style(&cc.egui_ctx, settings.style);
         apply_theme(&cc.egui_ctx, settings.theme);
         let ctx = cc.egui_ctx.clone();
 
@@ -285,6 +303,26 @@ impl Gui {
             });
         }
 
+        // Disk volumes (what macOS, swap and files take): at start and every 10 minutes.
+        let space = Arc::new(Mutex::new(SpaceInfo::default()));
+        {
+            let space = space.clone();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                macpilot::background_qos();
+                loop {
+                    let v = macpilot::space::volumes();
+                    let snaps = macpilot::space::local_snapshots();
+                    {
+                        let mut s = space.lock().unwrap();
+                        s.volumes = v;
+                        s.snapshots = snaps;
+                    }
+                    ctx.request_repaint();
+                    std::thread::sleep(Duration::from_secs(600));
+                }
+            });
+        }
         // Battery: every 5 seconds; health (a slower call) every 5 minutes.
         let power = Arc::new(Mutex::new(PowerInfo::default()));
         {
@@ -378,6 +416,9 @@ impl Gui {
             only_mine: false,
             sel: None,
             focus_search: false,
+            space,
+            changes_days: 7,
+            changes: None,
             power,
             battery_hist: macpilot::battery::load_history(),
             battery_days: 1,
@@ -419,6 +460,8 @@ impl Gui {
                 autostart::enabled()
             },
             last_status: None,
+            notified: HashMap::new(),
+            last_alert_check: Instant::now(),
             update: None,
             update_error: None,
             update_checking: false,
@@ -434,6 +477,9 @@ impl Gui {
         if g.settings.scan_on_start {
             g.start_home_scan();
         }
+        if g.settings.notifications {
+            mac::init_notifications();
+        }
         g.dev_setup();
         g
     }
@@ -442,6 +488,10 @@ impl Gui {
     fn dev_setup(&mut self) {
         if let Ok(p) = std::env::var("MACPILOT_SHOT") {
             self.shot = Some(Shot { path: PathBuf::from(p), started: Instant::now(), requested: false, sent: false });
+        }
+        if let Ok(st) = std::env::var("MACPILOT_STYLE") {
+            self.settings.style = if st == "classic" { macpilot::settings::UiStyle::Classic } else { macpilot::settings::UiStyle::Standard };
+            self.apply_style();
         }
         match std::env::var("MACPILOT_THEME").as_deref() {
             Ok("dark") => apply_theme(&self.ctx, Theme::Dark),
@@ -463,6 +513,7 @@ impl Gui {
         self.go_page(p);
         match sub {
             "map" => self.disk_mode = DiskMode::Map,
+            "summary" => self.disk_mode = DiskMode::Summary,
             "big" => self.disk_mode = DiskMode::Big,
             "stale" => self.disk_mode = DiskMode::Stale,
             "dupes" => {
@@ -568,7 +619,9 @@ impl Gui {
                 s.finished_in = Some(s.started.elapsed());
                 if s.root == macpilot::home() {
                     s.save_cache();
+                    macpilot::space::save_summary(s);
                 }
+                self.changes = None;
                 self.stale_dirty = true;
                 self.junk_dirty = true;
                 self.reload_dir();
@@ -579,6 +632,8 @@ impl Gui {
             if let Some(mut fresh) = self.rescan.take() {
                 fresh.finished_in = Some(fresh.started.elapsed());
                 fresh.save_cache();
+                macpilot::space::save_summary(&fresh);
+                self.changes = None;
                 self.scan = Some(fresh);
                 self.stale_dirty = true;
                 self.junk_dirty = true;
@@ -590,12 +645,14 @@ impl Gui {
         }
         self.refresh_stale();
         self.refresh_junk();
+        self.refresh_changes();
         if let Some((_, _, t)) = &self.toast {
             if t.elapsed() > Duration::from_secs(10) {
                 self.toast = None;
             }
         }
         self.log_battery();
+        self.alerts();
         if self.rescan_when_plugged && self.power.lock().unwrap().battery().is_some_and(|b| b.plugged) {
             self.rescan_when_plugged = false;
             self.rescan = Some(Scan::start(macpilot::home()));
@@ -869,7 +926,7 @@ impl Gui {
             let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop")));
             p.rect_filled(rect, 0, Color32::from_black_alpha(150));
             let inner = rect.shrink(24.0);
-            p.rect_stroke(inner, 16, egui::Stroke::new(3.0, widgets::C::ACCENT), egui::StrokeKind::Inside);
+            p.rect_stroke(inner, 16, egui::Stroke::new(3.0, widgets::C::accent()), egui::StrokeKind::Inside);
             p.text(inner.center(), egui::Align2::CENTER_CENTER, tr("Drop an app to uninstall it"), egui::FontId::proportional(26.0), Color32::WHITE);
             p.text(
                 inner.center() + egui::vec2(0.0, 36.0),
@@ -916,6 +973,135 @@ impl Gui {
             let _ = tx.send(Msg::Update(macpilot::update::check()));
             ctx.request_repaint();
         });
+    }
+
+    /// Measure the big folders outside the home folder (once; /Library alone can take half a minute).
+    pub fn measure_outside(&mut self) {
+        {
+            let mut s = self.space.lock().unwrap();
+            if s.measuring || !s.outside.is_empty() {
+                return;
+            }
+            s.measuring = true;
+            s.outside = macpilot::space::outside_home().into_iter().map(|(p, k)| (p, k, None)).collect();
+        }
+        let (space, ctx) = (self.space.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let paths: Vec<PathBuf> = space.lock().unwrap().outside.iter().map(|o| o.0.clone()).collect();
+            for (i, p) in paths.iter().enumerate() {
+                let size = disk::measure(p).size;
+                if let Some(o) = space.lock().unwrap().outside.get_mut(i) {
+                    o.2 = Some(size);
+                }
+                ctx.request_repaint();
+            }
+            space.lock().unwrap().measuring = false;
+        });
+    }
+
+    /// How the home folder changed since the saved summary closest to `changes_days` ago.
+    pub fn refresh_changes(&mut self) {
+        if self.changes.is_some() || !self.scan_ready() {
+            return;
+        }
+        let Some(scan) = self.scan.as_ref().filter(|s| s.root == macpilot::home()) else { return };
+        let now_at = scan.cached_at.unwrap_or_else(disk::now_unix);
+        let result = match macpilot::space::baseline(self.changes_days, now_at) {
+            Some(base) => {
+                let now = macpilot::space::summary(&scan.shared.dirs.lock().unwrap(), &scan.root);
+                (Some(base.at), macpilot::space::changes(&now, &base.sizes, &scan.root, 300_000_000))
+            }
+            None => (None, Vec::new()),
+        };
+        self.changes = Some(result);
+    }
+
+    /// Apply the chosen style: colors and fonts.
+    pub fn apply_style(&mut self) {
+        widgets::setup_style(&self.ctx, self.settings.style);
+    }
+
+    /// Send a notification unless the same one went out within `every`.
+    fn alert(&mut self, id: &str, every: Duration, title: &str, body: &str) {
+        if self.notified.get(id).is_some_and(|t| t.elapsed() < every) {
+            return;
+        }
+        self.notified.insert(id.to_string(), Instant::now());
+        mac::notify(id, title, body);
+    }
+
+    /// Rare, important problems worth a notification even when the window is closed.
+    fn alerts(&mut self) {
+        // A click on a notification opens the page it is about.
+        if let Some(id) = mac::take_clicked() {
+            let (kind, rest) = id.split_once(':').unwrap_or((id.as_str(), ""));
+            match kind {
+                "loop" | "energy" => {
+                    self.view = ProcView::Apps;
+                    self.sel = Some(Sel::Group(rest.to_string()));
+                    self.go_page(Page::Procs);
+                }
+                "disk" => {
+                    self.disk_mode = DiskMode::Summary;
+                    self.go_page(Page::Disk);
+                }
+                _ => self.go_page(Page::Battery),
+            }
+        }
+        if !self.settings.notifications || self.last_alert_check.elapsed() < Duration::from_secs(30) {
+            return;
+        }
+        self.last_alert_check = Instant::now();
+        let hours = |h: u64| Duration::from_secs(h * 3600);
+        let groups = self.snap.groups();
+
+        // An app stuck spawning copies of itself.
+        if let Some(gr) = groups.iter().filter(|g| g.pids.len() >= 300).max_by_key(|g| g.pids.len()) {
+            let title = trf("“{0}” is running {1}", &[&gr.label, &fmt::n(gr.pids.len() as u64, fmt::Noun::Process)]);
+            let body = tr("That is abnormal and usually means the app is stuck in a loop. Quit and reopen it.");
+            self.alert(&format!("loop:{}", gr.key), hours(6), &title, body);
+        }
+
+        // The disk is nearly full.
+        if let Some((avail, total)) = widgets::data_volume(&self.disks) {
+            if avail < 10_000_000_000 || (avail as f64) < total as f64 * 0.05 {
+                let title = trf("Only {0} free on the disk", &[&fmt::bytes(avail)]);
+                let body = tr("macOS needs free space for updates, swap and snapshots. Open MacPilot to see what takes the space.");
+                self.alert("disk:low", hours(6), &title, body);
+            }
+        }
+
+        // Battery.
+        let power = self.power.lock().unwrap().clone();
+        if let Some(b) = power.battery() {
+            if b.temperature >= 45.0 {
+                let title = trf("The battery is hot: {0}", &[&fmt::celsius(b.temperature)]);
+                let body = tr("Heat wears batteries fastest. Heavy apps, charging on a soft surface or in the sun make it worse.");
+                self.alert("battery:hot", hours(1), &title, body);
+            }
+            if b.needs_service() {
+                let h = b.health_pct().map(|h| format!("{h}%")).unwrap_or_default();
+                self.alert("battery:service", hours(24 * 7), tr("The battery needs service"), &trf("Maximum capacity: {0} of new.", &[&h]));
+            }
+            if !b.plugged {
+                if let Some(bl) = power.blockers.iter().find(|bl| bl.seconds >= 3600) {
+                    let name = battery_view::blocker_name(self, bl);
+                    let title = trf("“{0}” keeps the Mac awake", &[&name]);
+                    let body = trf("For {0} already. On battery this drains it even while you are away.", &[&fmt::duration(bl.seconds)]);
+                    self.alert(&format!("awake:{name}"), hours(3), &title, &body);
+                }
+                let heavy = groups
+                    .iter()
+                    .filter(|g| g.power.is_some_and(|w| w >= 8.0))
+                    .max_by(|a, b| a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)));
+                if let Some(gr) = heavy {
+                    let title = trf("“{0}” uses a lot of energy", &[&gr.label]);
+                    let body =
+                        trf("{0} right now. Quit it when you do not need it, and the charge lasts longer.", &[&fmt::watts(gr.power.unwrap_or(0.0))]);
+                    self.alert(&format!("energy:{}", gr.key), hours(3), &title, &body);
+                }
+            }
+        }
     }
 
     /// Remember the charge every 5 minutes (and when the charger is connected or removed) for the history chart.
@@ -973,6 +1159,7 @@ impl Gui {
         let home = macpilot::home();
         match Scan::load_cache(&home) {
             Some(cached) => {
+                macpilot::space::save_summary(&cached);
                 // A full scan costs several watts for a while: on battery a cache from today is good enough.
                 let age = cached.cached_at.map(|t| disk::now_unix() - t).unwrap_or(i64::MAX);
                 let on_battery = macpilot::battery::read().is_some_and(|b| !b.plugged);
@@ -1162,6 +1349,7 @@ impl eframe::App for Gui {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        widgets::begin_frame(&ctx);
         self.handle_shot(&ctx);
 
         self.handle_drop(&ctx);
@@ -1199,14 +1387,14 @@ impl eframe::App for Gui {
             self.focus_search |= search;
         }
 
-        egui::Panel::left("nav")
-            .exact_size(214.0)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(12, 14)))
-            .show(ui, |ui| self.sidebar(ui));
+        egui::Panel::left("nav").exact_size(214.0).resizable(false).frame(widgets::pane_frame(ui)).show(ui, |ui| self.sidebar(ui));
 
         egui::Panel::bottom("status")
-            .frame(egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(14, 6)))
+            .frame(if widgets::classic() {
+                egui::Frame::new().fill(C::paper()).stroke(egui::Stroke::new(1.0, C::fg())).inner_margin(egui::Margin::symmetric(14, 6))
+            } else {
+                egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(14, 6))
+            })
             .show(ui, |ui| self.status_bar(ui));
 
         match self.page {
@@ -1280,7 +1468,7 @@ impl Gui {
             if self.scan_stalled && self.toast.is_none() {
                 ui.label(
                     RichText::new(tr("The scan is waiting for macOS: answer the permission dialog, or give MacPilot Full Disk Access in Settings."))
-                        .color(C::YELLOW),
+                        .color(C::yellow()),
                 );
             } else {
                 match &self.toast {
@@ -1305,7 +1493,7 @@ impl Gui {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let s = &self.snap;
                 if s.is_root() {
-                    ui.label(RichText::new("root").color(C::RED));
+                    ui.label(RichText::new("root").color(C::red()));
                 }
                 ui.label(
                     RichText::new(trf(
@@ -1324,7 +1512,7 @@ impl Gui {
         let resp = egui::Modal::new(egui::Id::new("confirm")).show(ctx, |ui| {
             ui.set_width(540.0);
             ui.add_space(4.0);
-            let title_color = if c.danger { C::RED } else { C::ACCENT };
+            let title_color = if c.danger { C::red() } else { C::accent() };
             ui.label(RichText::new(&c.title).size(18.0).strong().color(title_color));
             ui.add_space(8.0);
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
@@ -1337,7 +1525,7 @@ impl Gui {
                 Some(word) => {
                     ui.horizontal(|ui| {
                         ui.label(tr("To confirm, type"));
-                        ui.label(RichText::new(word).strong().color(C::RED));
+                        ui.label(RichText::new(word).strong().color(C::red()));
                     });
                     let r = ui.add(egui::TextEdit::singleline(&mut c.input).hint_text(word).desired_width(200.0));
                     r.request_focus();
@@ -1348,7 +1536,7 @@ impl Gui {
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let fill = if c.danger { C::RED } else { C::ACCENT };
+                    let fill = if c.danger { C::red() } else { C::accent() };
                     let btn = egui::Button::new(RichText::new(&c.button).strong().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(120.0, 30.0));
                     if ui.add_enabled(ok_enabled, btn).clicked() {
                         decision = Some(true);

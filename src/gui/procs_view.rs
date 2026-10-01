@@ -88,10 +88,12 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| detail(g, ui));
     });
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
-        toolbar(g, ui);
-        ui.add_space(8.0);
-        let rows = build_rows(g);
-        table(g, ui, &rows);
+        w::centered(ui, |ui| {
+            toolbar(g, ui);
+            ui.add_space(8.0);
+            let rows = build_rows(g);
+            table(g, ui, &rows);
+        });
     });
 }
 
@@ -128,7 +130,7 @@ fn toolbar(g: &mut Gui, ui: &mut Ui) {
 
 fn sort_header(g: &mut Gui, ui: &mut Ui, label: &str, key: SortKey) {
     let arrow = if g.sort == key { if g.sort_desc { " ▼" } else { " ▲" } } else { "" };
-    let color = if g.sort == key { C::ACCENT } else { C::dim(ui) };
+    let color = if g.sort == key { C::accent() } else { C::dim(ui) };
     let r = ui.add(egui::Label::new(RichText::new(format!("{label}{arrow}")).strong().color(color)).sense(Sense::click()));
     if r.clicked() {
         if g.sort == key {
@@ -210,14 +212,14 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 let sel = Sel::Group(gr.key.clone());
                 row.set_selected(g.sel.as_ref() == Some(&sel));
                 row.col(|ui| {
-                    w::dot(ui, if gr.app.is_some() { C::ACCENT } else { C::track(ui) });
+                    w::dot(ui, if gr.app.is_some() { C::accent() } else { C::track(ui) });
                     ui.label(RichText::new(&gr.label).color(C::text(ui)));
                     if gr.pids.iter().any(|p| ports.contains_key(p)) {
-                        w::badge(ui, tr("network"), C::PURPLE);
+                        w::badge(ui, tr("network"), C::purple());
                     }
                 });
                 row.col(|ui| {
-                    ui.label(RichText::new(gr.pids.len().to_string()).color(if gr.pids.len() >= 200 { C::RED } else { C::dim(ui) }));
+                    ui.label(RichText::new(gr.pids.len().to_string()).color(if gr.pids.len() >= 200 { C::red() } else { C::dim(ui) }));
                 });
                 row.col(|ui| {
                     ui.label(RichText::new(fmt::pct(gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
@@ -244,7 +246,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                     }
                     ui.label(RichText::new(&p.name).color(C::text(ui)));
                     if ports.contains_key(pid) {
-                        w::badge(ui, tr("network"), C::PURPLE);
+                        w::badge(ui, tr("network"), C::purple());
                     }
                 });
                 row.col(|ui| {
@@ -260,7 +262,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 row.col(|ui| mem_cell(ui, p.mem, max_mem));
                 row.col(|ui| {
                     if p.stopped {
-                        w::badge(ui, tr("paused"), C::PURPLE);
+                        w::badge(ui, tr("paused"), C::purple());
                     } else {
                         ui.label(RichText::new(p.status).color(C::dim(ui)));
                     }
@@ -295,9 +297,9 @@ fn power_cell(ui: &mut Ui, w: Option<f32>) {
     match w {
         Some(v) if v >= 0.005 => {
             let color = if v >= 4.0 {
-                C::RED
+                C::red()
             } else if v >= 1.0 {
-                C::YELLOW
+                C::yellow()
             } else {
                 C::text(ui)
             };
@@ -321,7 +323,7 @@ fn ctx_menu(ui: &mut Ui, sel: &Sel, is_app: bool, out: &mut Option<(Sel, CtxActi
         (tr("Show on the Disk page"), CtxAction::Disk, false),
     ];
     for (label, a, red) in items {
-        let text = if red { RichText::new(label).color(C::RED) } else { RichText::new(label) };
+        let text = if red { RichText::new(label).color(C::red()) } else { RichText::new(label) };
         if ui.button(text).clicked() {
             *out = Some((sel.clone(), a));
             ui.close();
@@ -332,11 +334,11 @@ fn ctx_menu(ui: &mut Ui, sel: &Sel, is_app: bool, out: &mut Option<(Sel, CtxActi
 fn mem_cell(ui: &mut Ui, mem: u64, max: u64) {
     ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new(fmt::bytes(mem)).color(w::mem_color(ui, mem))));
     let color = if mem >= 2_000_000_000 {
-        C::RED
+        C::red()
     } else if mem >= 500_000_000 {
-        C::YELLOW
+        C::yellow()
     } else {
-        C::ACCENT
+        C::accent()
     };
     w::bar(ui, (mem as f64 / max as f64) as f32, egui::vec2(64.0, 5.0), color.gamma_multiply(0.85));
 }
@@ -441,7 +443,7 @@ fn ports_block(g: &Gui, ui: &mut Ui, pids: &[u32]) {
     ui.add_space(8.0);
     let local = all.iter().all(|p| p.ends_with(&format!("({})", tr("local"))));
     let text = if local { tr("Listens on this Mac only.") } else { tr("Accepts connections from the network.") };
-    w::note(ui, C::PURPLE, &trf("Open ports: {0}", &[&all.join(", ")]), text);
+    w::note(ui, C::purple(), &trf("Open ports: {0}", &[&all.join(", ")]), text);
 }
 
 fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
@@ -458,14 +460,14 @@ fn group_detail(g: &mut Gui, ui: &mut Ui, s: &Snapshot, gr: &AppGroup) {
         &[
             ("CPU", fmt::pct(gr.cpu), w::cpu_color(ui, gr.cpu)),
             (tr("Memory"), fmt::bytes(gr.mem), w::mem_color(ui, gr.mem)),
-            (tr("Processes"), gr.pids.len().to_string(), if gr.pids.len() >= 200 { C::RED } else { C::text(ui) }),
+            (tr("Processes"), gr.pids.len().to_string(), if gr.pids.len() >= 200 { C::red() } else { C::text(ui) }),
         ],
     );
     if gr.pids.len() >= 200 {
         ui.add_space(8.0);
         w::note(
             ui,
-            C::RED,
+            C::red(),
             tr("Looks like a malfunction"),
             tr("That many copies of one app is abnormal and usually means it is stuck in a loop. Quit and reopen it."),
         );
@@ -577,10 +579,10 @@ fn action_buttons(g: &mut Gui, ui: &mut Ui, safety: Safety, is_app: bool, single
         } else {
             (tr("Stop"), tr("Asks the process to quit (SIGTERM) so it can close everything properly."))
         };
-        if w::big_button(ui, label, C::ACCENT, !blocked).on_hover_text(hint).on_disabled_hover_text(safety.explain()).clicked() {
+        if w::big_button(ui, label, C::accent(), !blocked).on_hover_text(hint).on_disabled_hover_text(safety.explain()).clicked() {
             ask_stop(g, false);
         }
-        if w::big_button(ui, tr("Force quit"), C::RED, !blocked)
+        if w::big_button(ui, tr("Force quit"), C::red(), !blocked)
             .on_hover_text(tr("Kills the process immediately (SIGKILL). Unsaved work is lost. Use only if a normal stop did not help."))
             .on_disabled_hover_text(safety.explain())
             .clicked()
@@ -590,7 +592,7 @@ fn action_buttons(g: &mut Gui, ui: &mut Ui, safety: Safety, is_app: bool, single
         if let Some(p) = single {
             let label = if p.stopped { tr("Resume") } else { tr("Pause") };
             let r = ui
-                .add_enabled(safety == Safety::User, egui::Button::new(label).corner_radius(8).min_size(egui::vec2(0.0, 32.0)))
+                .add_enabled(safety == Safety::User, egui::Button::new(label).corner_radius(w::button_radius()).min_size(egui::vec2(0.0, 32.0)))
                 .on_hover_text(tr("Freeze the process for a while (it stops using CPU), then resume it."))
                 .on_disabled_hover_text(tr("Only your own processes can be paused: freezing a system one can hang the Mac."));
             if r.clicked() {

@@ -12,11 +12,21 @@ pub enum Theme {
     Dark,
 }
 
+/// Look of the app.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UiStyle {
+    /// The standard look.
+    Standard,
+    /// Black and white like the first Macintosh: 1-pixel lines, square corners, pixel font.
+    Classic,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     /// `None` = follow the macOS language.
     pub lang: Option<Lang>,
     pub theme: Theme,
+    pub style: UiStyle,
     /// "Not used for" threshold of the Stale view, days.
     pub stale_days: i64,
     /// Build folders of projects untouched for this many days are recommended for removal.
@@ -29,6 +39,8 @@ pub struct Settings {
     pub menu_bar: bool,
     /// Look for a newer release on GitHub once a day.
     pub check_updates: bool,
+    /// macOS notifications about problems (a stuck app, a full disk, the battery).
+    pub notifications: bool,
 }
 
 impl Default for Settings {
@@ -36,12 +48,14 @@ impl Default for Settings {
         Settings {
             lang: None,
             theme: Theme::System,
+            style: UiStyle::Standard,
             stale_days: 180,
             junk_days: 30,
             dupes_min_mb: 1,
             scan_on_start: true,
             menu_bar: true,
             check_updates: true,
+            notifications: true,
         }
     }
 }
@@ -70,12 +84,14 @@ impl Settings {
                         _ => Theme::System,
                     }
                 }
+                "style" => s.style = if v == "classic" { UiStyle::Classic } else { UiStyle::Standard },
                 "stale_days" => s.stale_days = v.parse().unwrap_or(s.stale_days),
                 "junk_days" => s.junk_days = v.parse().unwrap_or(s.junk_days),
                 "dupes_min_mb" => s.dupes_min_mb = v.parse().unwrap_or(s.dupes_min_mb),
                 "scan_on_start" => s.scan_on_start = v != "false",
                 "menu_bar" => s.menu_bar = v != "false",
                 "check_updates" => s.check_updates = v != "false",
+                "notifications" => s.notifications = v != "false",
                 _ => {}
             }
         }
@@ -90,14 +106,16 @@ impl Settings {
             Theme::Dark => "dark",
         };
         let text = format!(
-            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\n",
+            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\n",
             self.lang.map(|l| l.code()).unwrap_or("system"),
+            if self.style == UiStyle::Classic { "classic" } else { "standard" },
             self.stale_days,
             self.junk_days,
             self.dupes_min_mb,
             self.scan_on_start,
             self.menu_bar,
-            self.check_updates
+            self.check_updates,
+            self.notifications
         );
         std::fs::write(file(), text)
     }

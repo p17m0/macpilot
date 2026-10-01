@@ -1,7 +1,7 @@
 //! Disk usage analysis and deletion safety rules. Nothing is ever deleted permanently:
 //! removal always goes through the Trash (see `trash.rs`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,7 @@ use std::time::SystemTime;
 
 use rayon::prelude::*;
 
+use crate::dirmap::DirMap;
 use crate::{home, tr, trf};
 
 /// Files at least this big appear in the "Large files" list.
@@ -55,7 +56,7 @@ pub struct FileRec {
 
 /// Scan results, filled in the background.
 pub struct ScanShared {
-    pub dirs: Mutex<HashMap<PathBuf, DirStat>>,
+    pub dirs: Mutex<DirMap>,
     pub big: Mutex<Vec<FileRec>>,
     inodes: Mutex<HashSet<(u64, u64)>>,
     pub files: AtomicU64,
@@ -63,12 +64,19 @@ pub struct ScanShared {
     pub errors: AtomicU64,
     pub done: AtomicBool,
     pub cancel: AtomicBool,
+    /// Remember every folder (a full scan) or only add up the total (measuring one item).
+    keep_dirs: bool,
 }
 
 impl ScanShared {
     fn new() -> ScanShared {
+        Self::with_dirs(true)
+    }
+
+    fn with_dirs(keep_dirs: bool) -> ScanShared {
         ScanShared {
-            dirs: Mutex::new(HashMap::new()),
+            keep_dirs,
+            dirs: Mutex::new(DirMap::new()),
             big: Mutex::new(Vec::new()),
             inodes: Mutex::new(HashSet::new()),
             files: AtomicU64::new(0),
@@ -178,7 +186,7 @@ impl Scan {
     }
 
     pub fn dir(&self, p: &Path) -> Option<DirStat> {
-        self.shared.dirs.lock().unwrap().get(p).copied()
+        self.shared.dirs.lock().unwrap().get(p)
     }
 
     pub fn covers(&self, p: &Path) -> bool {
@@ -188,13 +196,13 @@ impl Scan {
     /// After moving something to the Trash, subtract it from all parent folders.
     pub fn forget(&self, p: &Path, size: u64, files: u64) {
         let mut dirs = self.shared.dirs.lock().unwrap();
-        dirs.retain(|k, _| !k.starts_with(p));
+        dirs.remove_tree(p);
         let mut cur = p.parent();
         while let Some(d) = cur {
-            if let Some(st) = dirs.get_mut(d) {
+            dirs.get_mut_apply(d, |st| {
                 st.size = st.size.saturating_sub(size);
                 st.files = st.files.saturating_sub(files);
-            }
+            });
             if d == self.root {
                 break;
             }
@@ -232,132 +240,57 @@ impl Drop for Scan {
 }
 
 fn cache_path() -> PathBuf {
-    home().join("Library/Caches/MacPilot/scan-v1.bin")
+    home().join("Library/Caches/MacPilot/scan-v2.bin")
 }
 
-/// Compact binary format of the scan cache: sorted paths with shared prefixes, numbers as varints.
-/// About 30 bytes per folder; a home folder with 260 000 folders takes ~8 MB and loads in ~0.1 s.
+/// Scan cache: the folder tree (see [`DirMap::encode`]) and the large files, numbers as varints.
+/// About 25 bytes per folder; a home folder with 250 000 folders takes ~6 MB and loads in ~0.1 s.
 mod cache {
-    use super::{DirStat, FileRec};
-    use std::collections::HashMap;
+    use super::FileRec;
+    use crate::dirmap::{DirMap, Reader, put};
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
 
-    const MAGIC: &[u8] = b"MACPILOT-SCAN-1\n";
+    const MAGIC: &[u8] = b"MACPILOT-SCAN-2\n";
 
-    fn put(out: &mut Vec<u8>, mut v: u64) {
-        while v >= 0x80 {
-            out.push(v as u8 | 0x80);
-            v >>= 7;
-        }
-        out.push(v as u8);
-    }
-
-    struct Reader<'a> {
-        b: &'a [u8],
-        i: usize,
-    }
-
-    impl Reader<'_> {
-        fn num(&mut self) -> Option<u64> {
-            let mut v = 0u64;
-            for shift in (0..64).step_by(7) {
-                let byte = *self.b.get(self.i)?;
-                self.i += 1;
-                v |= u64::from(byte & 0x7f) << shift;
-                if byte < 0x80 {
-                    return Some(v);
-                }
-            }
-            None
-        }
-        fn bytes(&mut self, n: usize) -> Option<&[u8]> {
-            let s = self.b.get(self.i..self.i.checked_add(n)?)?;
-            self.i += n;
-            Some(s)
-        }
-    }
-
-    /// Paths are written as (bytes shared with the previous path, rest).
-    fn put_paths<'a>(out: &mut Vec<u8>, paths: impl Iterator<Item = &'a Path>, mut extra: impl FnMut(&mut Vec<u8>, &Path)) {
-        let mut prev: &[u8] = &[];
-        for p in paths {
-            let b = p.as_os_str().as_bytes();
-            let common = prev.iter().zip(b).take_while(|(x, y)| x == y).count();
-            put(out, common as u64);
-            put(out, (b.len() - common) as u64);
-            out.extend_from_slice(&b[common..]);
-            extra(out, p);
-            prev = b;
-        }
-    }
-
-    fn get_path(r: &mut Reader, prev: &mut Vec<u8>) -> Option<PathBuf> {
-        let common = r.num()? as usize;
-        let len = r.num()? as usize;
-        if common > prev.len() {
-            return None;
-        }
-        prev.truncate(common);
-        prev.extend_from_slice(r.bytes(len)?);
-        Some(PathBuf::from(OsStr::from_bytes(prev)))
-    }
-
-    pub fn encode(root: &Path, at: i64, dirs: &HashMap<PathBuf, DirStat>, big: &[FileRec]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(dirs.len() * 32 + 64);
+    pub fn encode(root: &Path, at: i64, dirs: &DirMap, big: &[FileRec]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(dirs.len() * 28 + 64);
         out.extend_from_slice(MAGIC);
         let rb = root.as_os_str().as_bytes();
         put(&mut out, rb.len() as u64);
         out.extend_from_slice(rb);
         put(&mut out, at.max(0) as u64);
-        let mut keys: Vec<&PathBuf> = dirs.keys().collect();
-        keys.sort_unstable_by(|a, b| a.as_os_str().as_bytes().cmp(b.as_os_str().as_bytes()));
-        put(&mut out, keys.len() as u64);
-        put_paths(&mut out, keys.iter().map(|p| p.as_path()), |out, p| {
-            let d = &dirs[p];
-            for v in [d.size, d.files, d.modified.max(0) as u64, d.used.max(0) as u64, d.media] {
-                put(out, v);
-            }
-        });
-        let mut files: Vec<&FileRec> = big.iter().collect();
-        files.sort_unstable_by(|a, b| a.path.as_os_str().as_bytes().cmp(b.path.as_os_str().as_bytes()));
-        put(&mut out, files.len() as u64);
-        let mut i = 0;
-        put_paths(&mut out, files.iter().map(|f| f.path.as_path()), |out, _| {
-            let f = files[i];
-            i += 1;
+        dirs.encode(&mut out);
+        put(&mut out, big.len() as u64);
+        for f in big {
+            let b = f.path.as_os_str().as_bytes();
+            put(&mut out, b.len() as u64);
+            out.extend_from_slice(b);
             for v in [f.size, f.modified.max(0) as u64, f.used.max(0) as u64, u64::from(f.media)] {
-                put(out, v);
+                put(&mut out, v);
             }
-        });
+        }
         out
     }
 
-    type Decoded = (PathBuf, i64, HashMap<PathBuf, DirStat>, Vec<FileRec>);
+    type Decoded = (PathBuf, i64, DirMap, Vec<FileRec>);
 
     pub fn decode(b: &[u8]) -> Option<Decoded> {
         let mut r = Reader { b: b.strip_prefix(MAGIC)?, i: 0 };
         let rl = r.num()? as usize;
         let root = PathBuf::from(OsStr::from_bytes(r.bytes(rl)?));
         let at = r.num()? as i64;
-        let n = r.num()? as usize;
-        let mut dirs = HashMap::with_capacity(n.min(4_000_000));
-        let mut prev = Vec::new();
-        for _ in 0..n {
-            let p = get_path(&mut r, &mut prev)?;
-            let (size, files, modified, used, media) = (r.num()?, r.num()?, r.num()? as i64, r.num()? as i64, r.num()?);
-            dirs.insert(p, DirStat { size, files, modified, used, media });
-        }
+        let dirs = DirMap::decode(&mut r)?;
         let n = r.num()? as usize;
         let mut big = Vec::with_capacity(n.min(100_000));
-        prev.clear();
         for _ in 0..n {
-            let path = get_path(&mut r, &mut prev)?;
+            let len = r.num()? as usize;
+            let path = PathBuf::from(OsStr::from_bytes(r.bytes(len)?));
             let (size, modified, used, media) = (r.num()?, r.num()? as i64, r.num()? as i64, r.num()? != 0);
             big.push(FileRec { size, path, modified, used, media });
         }
-        Some((root, at, dirs, big))
+        (r.i == r.b.len()).then_some((root, at, dirs, big))
     }
 }
 
@@ -511,7 +444,7 @@ fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
         if media {
             st.media += size;
         }
-        if size >= TRACK_FILE {
+        if size >= TRACK_FILE && s.keep_dirs {
             let mut big = s.big.lock().unwrap();
             big.push(FileRec { size, path, modified: md.mtime(), used, media });
             if big.len() > TRACK_KEEP * 2 {
@@ -524,8 +457,8 @@ fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
     s.bytes.fetch_add(st.size, Ordering::Relaxed);
     let sub = subdirs.par_iter().map(|(d, mt)| walk(s, d, *mt)).reduce(DirStat::default, DirStat::merge);
     st = st.merge(sub);
-    if !s.cancel.load(Ordering::Relaxed) {
-        s.dirs.lock().unwrap().insert(path.to_path_buf(), st);
+    if s.keep_dirs && !s.cancel.load(Ordering::Relaxed) {
+        s.dirs.lock().unwrap().insert(path, st);
     }
     st
 }
@@ -536,7 +469,8 @@ pub fn measure(path: &Path) -> DirStat {
     if !reachable(path) {
         return DirStat::default();
     }
-    let s = ScanShared::new();
+    // Only the total is needed: no per-folder map, no list of large files.
+    let s = ScanShared::with_dirs(false);
     match fs::symlink_metadata(path) {
         Ok(md) if md.is_dir() && rayon::current_thread_index().is_some() => walk(&s, path, md.mtime()),
         Ok(md) if md.is_dir() => pool().install(|| walk(&s, path, md.mtime())),
@@ -573,7 +507,7 @@ pub fn list_dir(dir: &Path, scan: Option<&Scan>) -> Result<Vec<Entry>, String> {
     for (path, name, md) in rd {
         let is_dir = md.is_dir();
         let (size, files, mtime, used) = if is_dir {
-            match dirs.as_ref().and_then(|d| d.get(&path)) {
+            match dirs.as_ref().and_then(|d| d.get(&path)).as_ref() {
                 Some(st) => (Some(st.size), Some(st.files), Some(st.modified), Some(st.used)),
                 None if skip_dir(&path) => (Some(0), None, None, None),
                 None => (None, None, None, None),
@@ -721,18 +655,12 @@ fn stale_eligible(p: &Path, is_dir: bool) -> bool {
 pub fn stale_items(scan: &Scan, older_than_secs: i64) -> Vec<StaleItem> {
     let cutoff = now_unix() - older_than_secs;
     let dirs = scan.shared.dirs.lock().unwrap();
+    // Cheap checks on the numbers first; paths are built only for the survivors.
     let mut cands: Vec<(PathBuf, DirStat)> = dirs
         .iter()
-        .filter(|(p, st)| {
-            **p != scan.root
-                && st.used > 0
-                && st.used < cutoff
-                && st.size >= STALE_DIR_MIN
-                && st.media * 2 < st.size
-                && !stale_excluded(p)
-                && stale_eligible(p, true)
-        })
-        .map(|(p, st)| (p.clone(), *st))
+        .filter(|(_, st)| st.used > 0 && st.used < cutoff && st.size >= STALE_DIR_MIN && st.media * 2 < st.size)
+        .map(|(i, st)| (dirs.path(i), st))
+        .filter(|(p, _)| *p != scan.root && !stale_excluded(p) && stale_eligible(p, true))
         .collect();
     drop(dirs);
     // Shallow folders first, so nested ones are not listed twice.
@@ -1077,17 +1005,17 @@ mod tests {
     #[test]
     fn scan_cache_round_trip() {
         let root = h("");
-        let mut dirs = HashMap::new();
-        dirs.insert(root.clone(), DirStat { size: 1 << 40, files: 3, modified: 1_700_000_000, used: 1_700_000_500, media: 7 });
-        dirs.insert(h("Dev"), DirStat { size: 10, files: 1, modified: 5, used: 6, media: 0 });
-        dirs.insert(h("Dev/проект"), DirStat { size: 4, files: 1, modified: 0, used: -3, media: 0 });
+        let mut dirs = DirMap::new();
+        dirs.insert(&root, DirStat { size: 1 << 40, files: 3, modified: 1_700_000_000, used: 1_700_000_500, media: 7 });
+        dirs.insert(&h("Dev"), DirStat { size: 10, files: 1, modified: 5, used: 6, media: 0 });
+        dirs.insert(&h("Dev/проект"), DirStat { size: 4, files: 1, modified: 0, used: -3, media: 0 });
         let big = vec![FileRec { size: 99, path: h("Dev/big.bin"), modified: 1, used: 2, media: true }];
         let data = cache::encode(&root, 42, &dirs, &big);
         let (r, at, d, b) = cache::decode(&data).expect("decodes");
         assert_eq!((r, at, d.len(), b.len()), (root, 42, 3, 1));
-        assert_eq!(d[&h("Dev/проект")].size, 4);
-        assert_eq!(d[&h("Dev/проект")].used, 0, "negative times are clamped");
-        assert_eq!(d[&h("")].size, 1 << 40);
+        assert_eq!(d.get(&h("Dev/проект")).unwrap().size, 4);
+        assert_eq!(d.get(&h("Dev/проект")).unwrap().used, 0, "negative times are clamped");
+        assert_eq!(d.get(&h("")).unwrap().size, 1 << 40);
         assert!(b[0].media && b[0].path == h("Dev/big.bin"));
         // Truncated or foreign files are rejected instead of giving wrong numbers.
         assert!(cache::decode(&data[..data.len() - 3]).is_none());

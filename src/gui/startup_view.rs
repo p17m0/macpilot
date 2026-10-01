@@ -18,6 +18,7 @@ fn scope_text(s: Scope) -> &'static str {
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
+        w::centered(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("Startup")).size(24.0).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -37,7 +38,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         };
         let unwanted = items.iter().filter(|i| i.unwanted && !i.disabled).count();
         if unwanted > 0 {
-            w::note(ui, C::RED, &trf("{0} unwanted item(s) found", &[&unwanted]), tr("MacKeeper and similar “cleaners” are known for nagging and fake alerts. Turn them off here and uninstall the app on the Apps page."));
+            w::note(ui, C::red(), &trf("{0} unwanted item(s) found", &[&unwanted]), tr("MacKeeper and similar “cleaners” are known for nagging and fake alerts. Turn them off here and uninstall the app on the Apps page."));
             ui.add_space(6.0);
         }
         if items.is_empty() {
@@ -78,10 +79,10 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(&it.label).strong());
                                 if it.unwanted {
-                                    w::badge(ui, tr("unwanted"), C::RED);
+                                    w::badge(ui, tr("unwanted"), C::red());
                                 }
                                 if it.broken {
-                                    w::badge(ui, tr("broken"), C::YELLOW);
+                                    w::badge(ui, tr("broken"), C::yellow());
                                 }
                             });
                             let prog = if it.program.is_empty() { fmt::path(&it.path) } else { it.program.clone() };
@@ -99,9 +100,9 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         if it.disabled {
                             w::badge(ui, tr("off"), C::dim(ui));
                         } else if running {
-                            w::badge(ui, tr("running"), C::GREEN);
+                            w::badge(ui, tr("running"), C::green());
                         } else if it.broken {
-                            w::badge(ui, tr("program missing"), C::YELLOW);
+                            w::badge(ui, tr("program missing"), C::yellow());
                         } else {
                             w::badge(ui, tr("not running"), C::dim(ui));
                         }
@@ -113,7 +114,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                             macpilot::trash::reveal_in_finder(&p);
                             ui.close();
                         }
-                        if item.scope == Scope::User && ui.button(RichText::new(tr("Move to Trash…")).color(C::RED)).clicked() {
+                        if item.scope == Scope::User && ui.button(RichText::new(tr("Move to Trash…")).color(C::red())).clicked() {
                             remove = Some(item.clone());
                             ui.close();
                         }
@@ -142,5 +143,6 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
             ];
             g.confirm = Some(Confirm::new(tr("Remove this startup item?"), lines, Action::Trash { paths: vec![item.path.clone()], size: 0 }, tr("Move to Trash")));
         }
+        });
     });
 }

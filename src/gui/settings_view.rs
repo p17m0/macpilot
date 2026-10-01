@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, RichText, Ui};
 use macpilot::i18n::Lang;
-use macpilot::settings::Theme;
+use macpilot::settings::{Theme, UiStyle};
 use macpilot::{tr, trf};
 
 use crate::widgets::{self as w, C, Level};
@@ -27,6 +27,7 @@ fn row(ui: &mut Ui, title: &str, hint: &str, add: impl FnOnce(&mut Ui)) {
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
+        w::centered(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.set_max_width(820.0);
             w::header(ui, tr("Settings"), "");
@@ -52,6 +53,16 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                 g.language_changed();
             }
 
+            let mut style = g.settings.style;
+            row(ui, tr("Style"), tr("Classic looks like the first Macintosh: black and white, with a pixel font."), |ui| {
+                w::segmented(ui, &mut style, &[(UiStyle::Standard, tr("Standard")), (UiStyle::Classic, tr("Classic Macintosh"))]);
+            });
+            if style != g.settings.style {
+                g.settings.style = style;
+                g.apply_style();
+                g.save_settings();
+            }
+
             let mut theme = g.settings.theme;
             row(ui, tr("Appearance"), "", |ui| {
                 w::segmented(ui, &mut theme, &[(Theme::System, tr("System")), (Theme::Light, tr("Light")), (Theme::Dark, tr("Dark"))]);
@@ -74,7 +85,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
             }
 
             if g.autostart && autostart::needs_approval() {
-                w::note(ui, C::YELLOW, tr("Launch at login is switched off in System Settings"), tr("Turn MacPilot on in System Settings → General → Login Items."));
+                w::note(ui, C::yellow(), tr("Launch at login is switched off in System Settings"), tr("Turn MacPilot on in System Settings → General → Login Items."));
                 if ui.button(tr("Login Items settings…")).clicked() {
                     crate::mac::open_login_items_settings();
                 }
@@ -91,6 +102,23 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
             );
             if bar != g.settings.menu_bar {
                 g.settings.menu_bar = bar;
+                g.save_settings();
+            }
+
+            let mut notes = g.settings.notifications;
+            row(
+                ui,
+                tr("Notifications"),
+                tr("Only about real problems: an app stuck in a loop, an almost full disk, a hot battery or an app draining it."),
+                |ui| {
+                    w::switch(ui, &mut notes, tr("Notifications"));
+                },
+            );
+            if notes != g.settings.notifications {
+                g.settings.notifications = notes;
+                if notes {
+                    crate::mac::init_notifications();
+                }
                 g.save_settings();
             }
 
@@ -144,15 +172,16 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         macpilot::open_full_disk_access_settings();
                     }
                     if g.full_disk_access {
-                        w::badge(ui, tr("granted"), C::GREEN);
+                        w::badge(ui, tr("granted"), C::green());
                     } else {
-                        w::badge(ui, tr("not granted"), C::YELLOW);
+                        w::badge(ui, tr("not granted"), C::yellow());
                     }
                 });
             });
             updates(g, ui);
             ui.add_space(10.0);
             ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
+        });
         });
     });
 }
@@ -165,7 +194,7 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(trf("MacPilot {0} is available", &[&u.version])).strong().color(C::GREEN));
+                    ui.label(RichText::new(trf("MacPilot {0} is available", &[&u.version])).strong().color(C::green()));
                     ui.label(
                         RichText::new(trf(
                             "You have {0}. Download the new version and replace the app in Applications.",
@@ -176,7 +205,7 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new(tr("Download")).color(egui::Color32::WHITE)).fill(C::ACCENT)).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(tr("Download")).color(egui::Color32::WHITE)).fill(C::accent())).clicked() {
                         let _ = std::process::Command::new("open").arg(&u.url).spawn();
                     }
                 });

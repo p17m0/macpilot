@@ -106,8 +106,10 @@ pub fn find(scan: &Scan) -> Vec<Junk> {
     let dirs = scan.shared.dirs.lock().unwrap();
     let mut cands: Vec<(PathBuf, &'static str, DirStat)> = dirs
         .iter()
-        .filter(|(p, st)| st.size >= 1_000_000 && in_user_project(p))
-        .filter_map(|(p, st)| artifact_kind(p).map(|k| (p.clone(), k, *st)))
+        .filter(|(_, st)| st.size >= 1_000_000)
+        .map(|(i, st)| (dirs.path(i), st))
+        .filter(|(p, _)| in_user_project(p))
+        .filter_map(|(p, st)| artifact_kind(&p).map(|k| (p, k, st)))
         .collect();
     drop(dirs);
     // Top-most only: node_modules inside node_modules, build inside target, etc. are covered by the outer one.

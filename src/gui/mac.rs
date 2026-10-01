@@ -184,3 +184,85 @@ pub fn set_login_item(on: bool) -> Result<(), String> {
 pub fn open_login_items_settings() {
     unsafe { SMAppService::openSystemSettingsLoginItems() };
 }
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+use objc2::runtime::ProtocolObject;
+use objc2_user_notifications::{
+    UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationPresentationOptions, UNNotificationRequest,
+    UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+};
+
+define_class!(
+    // Shows banners while MacPilot is in front and opens the right page on a click.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "MacPilotNotificationDelegate"]
+    struct NotifyDelegate;
+
+    unsafe impl NSObjectProtocol for NotifyDelegate {}
+
+    unsafe impl UNUserNotificationCenterDelegate for NotifyDelegate {
+        #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+        fn will_present(
+            &self,
+            _c: &UNUserNotificationCenter,
+            _n: &UNNotification,
+            done: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+        ) {
+            done.call((UNNotificationPresentationOptions::Banner | UNNotificationPresentationOptions::List,));
+        }
+
+        #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+        fn did_receive(&self, _c: &UNUserNotificationCenter, r: &UNNotificationResponse, done: &block2::DynBlock<dyn Fn()>) {
+            let id = r.notification().request().identifier().to_string();
+            *CLICKED.lock().unwrap() = Some(id);
+            show_window();
+            done.call(());
+        }
+    }
+);
+
+static CLICKED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+thread_local! {
+    static NOTIFY: RefCell<Option<Retained<NotifyDelegate>>> = const { RefCell::new(None) };
+}
+
+/// Notifications need a real app bundle (the notification center refuses a bare binary).
+fn can_notify() -> bool {
+    std::env::current_exe().ok().and_then(|e| macpilot::procs::outer_app(&e)).is_some()
+}
+
+/// Ask for permission (macOS asks the user once) and start listening for clicks.
+pub fn init_notifications() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if !can_notify() || NOTIFY.with(|n| n.borrow().is_some()) {
+        return;
+    }
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let delegate: Retained<NotifyDelegate> = unsafe { msg_send![NotifyDelegate::alloc(mtm), init] };
+    center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    NOTIFY.with(|n| *n.borrow_mut() = Some(delegate));
+    let done = block2::RcBlock::new(|_granted: objc2::runtime::Bool, _err: *mut objc2_foundation::NSError| {});
+    center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &done);
+}
+
+/// Show a notification. The same `id` replaces the previous one instead of stacking up.
+pub fn notify(id: &str, title: &str, body: &str) {
+    if !can_notify() || NOTIFY.with(|n| n.borrow().is_none()) {
+        return;
+    }
+    let content = UNMutableNotificationContent::new();
+    content.setTitle(&ns(title));
+    content.setBody(&ns(body));
+    let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&ns(id), &content, None);
+    UNUserNotificationCenter::currentNotificationCenter().addNotificationRequest_withCompletionHandler(&request, None);
+}
+
+/// The id of a notification the user clicked since the last call.
+pub fn take_clicked() -> Option<String> {
+    CLICKED.lock().unwrap().take()
+}

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0
+
+- **Classic Macintosh style** (Settings → Style), light and dark: black and white (white on black in the dark theme), 1-pixel lines, square corners, hard drop shadows, striped page titles and a pixel font (Pixelify Sans, SIL OFL). The standard look stays the default.
+- The logo in the window follows the style: in color normally, black and white in Classic.
+- Page content is centered and at most 1180 px wide on large windows.
+- **Disk → Summary**: the whole disk in one bar — your home folder, apps and other folders, macOS, swap, free space, and how much MacPilot cannot see (usually other apps' data such as Docker or virtual machine images, visible with Full Disk Access). Local Time Machine snapshots are listed.
+- **What changed**: MacPilot keeps a small daily summary of the home folder (~30 KB a day, 35 days) and shows which folders grew or shrank over 1, 7 or 30 days. The Overview warns when your files grew by 5 GB or more.
+- **Notifications** (can be turned off): an app stuck spawning hundreds of processes, a nearly full disk, a hot battery, an app draining the battery or keeping the Mac awake on battery power. A click opens the right page.
+- **Less memory**: the folder map of a scan is a compact tree (18 MB instead of ~50 MB for 250 000 folders), and measuring cleanup targets, apps and leftovers no longer builds throwaway folder maps. The scan cache format is v2 (rebuilt once).
+- The Overview says how much of the disk is hidden without Full Disk Access.
+
 ## 0.4.0
 
 - **Battery page**: charge and time left, power drawn right now, health and condition exactly as System Settings reports them, charge cycles and temperature. A 24-hour / 7-day charge chart (MacPilot logs the charge every 5 minutes), average drain per hour, apps using energy now, and what keeps the Mac awake. Advice when the battery needs service, is hot, is near its rated cycles, or is low without Low Power Mode.

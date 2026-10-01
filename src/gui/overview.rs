@@ -20,7 +20,7 @@ fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec
     let to_battery = || -> Box<dyn FnOnce(&mut Gui)> { Box::new(|g: &mut Gui| g.go_page(Page::Battery)) };
     if b.needs_service() {
         out.push(Rec {
-            color: C::RED,
+            color: C::red(),
             title: tr("The battery needs service").into(),
             text: trf("Maximum capacity: {0} of new.", &[&b.health_pct().map(|h| format!("{h}%")).unwrap_or_default()]),
             button: tr("Battery"),
@@ -29,7 +29,7 @@ fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec
     }
     if b.temperature >= 40.0 {
         out.push(Rec {
-            color: C::YELLOW,
+            color: C::yellow(),
             title: trf("The battery is hot: {0}", &[&fmt::celsius(b.temperature)]),
             text: tr("Heat wears batteries fastest. Heavy apps, charging on a soft surface or in the sun make it worse.").into(),
             button: tr("Battery"),
@@ -45,7 +45,7 @@ fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec
     {
         let key = gr.key.clone();
         out.push(Rec {
-            color: C::YELLOW,
+            color: C::yellow(),
             title: trf("“{0}” uses a lot of energy", &[&gr.label]),
             text: trf("{0} right now. Quit it when you do not need it, and the charge lasts longer.", &[&fmt::watts(gr.power.unwrap_or(0.0))]),
             button: tr("Show"),
@@ -58,7 +58,7 @@ fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec
     }
     if let Some(bl) = info.blockers.iter().find(|bl| bl.seconds >= 30 * 60) {
         out.push(Rec {
-            color: C::YELLOW,
+            color: C::yellow(),
             title: trf("“{0}” keeps the Mac awake", &[&crate::battery_view::blocker_name(g, bl)]),
             text: trf("For {0} already. On battery this drains it even while you are away.", &[&fmt::duration(bl.seconds)]),
             button: tr("Battery"),
@@ -72,10 +72,30 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let s = &g.snap;
 
     if !g.full_disk_access {
+        // How much of the disk is out of sight right now (data volume minus what the scan sees).
+        let hidden = {
+            let sp = g.space.lock().unwrap();
+            let home = g
+                .scan
+                .as_ref()
+                .filter(|s| s.root == macpilot::home() && (s.done() || s.cached_at.is_some()))
+                .and_then(|s| s.dir(&s.root))
+                .map(|d| d.size);
+            let outside: u64 = sp.outside.iter().filter_map(|o| o.2).sum();
+            sp.volumes.zip(home).map(|(v, h)| v.data.saturating_sub(h + outside)).filter(|h| *h > 10_000_000_000)
+        };
+        let mut text = tr("Without it macOS hides some folders and may pause the scan with permission dialogs. MacPilot only reads — nothing is removed without you.").to_string();
+        if let Some(h) = hidden {
+            text = trf(
+                "About {0} of your disk is hidden from MacPilot now — usually data of other apps, like Docker or virtual machines.",
+                &[&fmt::bytes(h)],
+            ) + " "
+                + &text;
+        }
         out.push(Rec {
-            color: C::ACCENT,
+            color: C::accent(),
             title: tr("Give MacPilot Full Disk Access").into(),
-            text: tr("Without it macOS hides some folders and may pause the scan with permission dialogs. MacPilot only reads — nothing is removed without you.").into(),
+            text,
             button: tr("Open settings"),
             go: Box::new(|_| macpilot::open_full_disk_access_settings()),
         });
@@ -85,7 +105,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         let free = avail as f64 / total.max(1) as f64;
         if free < 0.10 {
             out.push(Rec {
-                color: C::RED,
+                color: C::red(),
                 title: trf("Only {0} free on the disk", &[&fmt::bytes(avail)]),
                 text: tr("macOS needs free space for updates, swap and snapshots. Below 10% the Mac slows down.").into(),
                 button: tr("Free up space"),
@@ -99,7 +119,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     if let Some(gr) = groups.iter().filter(|gr| gr.pids.len() >= 200).max_by_key(|gr| gr.pids.len()) {
         let key = gr.key.clone();
         out.push(Rec {
-            color: C::RED,
+            color: C::red(),
             title: trf("“{0}” is running {1}", &[&gr.label, &fmt::n(gr.pids.len() as u64, fmt::Noun::Process)]),
             text: tr("That is abnormal and usually means the app is stuck in a loop. Quit and reopen it.").into(),
             button: tr("Show"),
@@ -117,7 +137,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         top.sort_by_key(|a| std::cmp::Reverse(a.mem));
         let names: Vec<String> = top.iter().take(3).map(|g| format!("{} ({})", g.label, fmt::bytes(g.mem))).collect();
         out.push(Rec {
-            color: if s.pressure >= 4 { C::RED } else { C::YELLOW },
+            color: if s.pressure >= 4 { C::red() } else { C::yellow() },
             title: tr("Memory is under pressure").into(),
             text: if s.swap_used > 0 {
                 trf("Swap in use: {0}. Biggest users: {1}.", &[&fmt::bytes(s.swap_used), &names.join(", ")])
@@ -134,10 +154,27 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
 
     battery_recs(g, &groups, &mut out);
 
+    // The home folder grew a lot lately: say where.
+    if let Some((Some(at), list)) = &g.changes {
+        let grown: u64 = list.iter().filter(|c| c.delta() > 0).map(|c| c.delta() as u64).sum();
+        if let Some(top) = list.iter().find(|c| c.delta() > 0).filter(|_| grown >= 5_000_000_000) {
+            out.push(Rec {
+                color: C::yellow(),
+                title: trf("Your files grew by {0} since {1}", &[&fmt::bytes(grown), &fmt::date(*at)]),
+                text: trf("Most of it: {0} (+{1}).", &[&fmt::path(&top.path), &fmt::bytes(top.delta() as u64)]),
+                button: tr("Show"),
+                go: Box::new(|g| {
+                    g.disk_mode = DiskMode::Summary;
+                    g.go_page(Page::Disk);
+                }),
+            });
+        }
+    }
+
     if let Some(hot) = s.procs.iter().filter(|p| p.cpu >= 90.0 && !p.safety.blocked()).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
         let pid = hot.pid;
         out.push(Rec {
-            color: C::YELLOW,
+            color: C::yellow(),
             title: trf("“{0}” is using {1} CPU", &[&hot.name, &fmt::pct(hot.cpu)]),
             text: tr("100% means one fully busy core. If it is not doing something you asked for, it may be stuck.").into(),
             button: tr("Show"),
@@ -153,7 +190,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         let bad: Vec<&str> = items.iter().filter(|i| i.unwanted && !i.disabled).map(|i| i.label.as_str()).collect();
         if !bad.is_empty() {
             out.push(Rec {
-                color: C::RED,
+                color: C::red(),
                 title: trf("{0} unwanted startup item(s)", &[&bad.len()]),
                 text: trf("Known nagware/adware starts with your Mac: {0}.", &[&bad.join(", ")]),
                 button: tr("Review"),
@@ -163,7 +200,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         let broken = items.iter().filter(|i| i.broken && !i.disabled).count();
         if broken > 0 {
             out.push(Rec {
-                color: C::YELLOW,
+                color: C::yellow(),
                 title: trf("{0} broken startup item(s)", &[&broken]),
                 text: tr("They point to programs that no longer exist — leftovers of removed apps.").into(),
                 button: tr("Review"),
@@ -175,7 +212,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let caches: u64 = g.targets.iter().filter(|t| t.cleanable()).filter_map(|t| t.stat.map(|s| s.size)).sum();
     if caches > 500_000_000 {
         out.push(Rec {
-            color: C::GREEN,
+            color: C::green(),
             title: trf("{0} of caches and logs", &[&fmt::bytes(caches)]),
             text: tr("Apps recreate them when needed. Safe to clean.").into(),
             button: tr("Clean up"),
@@ -191,7 +228,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let junk_size: u64 = old_junk.iter().map(|j| j.size).sum();
     if junk_size > 200_000_000 {
         out.push(Rec {
-            color: C::GREEN,
+            color: C::green(),
             title: trf("{0} of old build folders", &[&fmt::bytes(junk_size)]),
             text: trf(
                 "{0} not changed for {1} still keep node_modules, target, build… They are rebuilt on demand.",
@@ -208,7 +245,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     let stale: u64 = g.stale.iter().map(|i| i.size).sum();
     if stale > 500_000_000 {
         out.push(Rec {
-            color: C::YELLOW,
+            color: C::yellow(),
             title: trf("{0} not used for a long time", &[&fmt::bytes(stale)]),
             text: trf(
                 "{0} were not opened or changed for more than {1} (photos, video and music are not included).",
@@ -228,7 +265,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         let size: u64 = unused.iter().map(|a| a.size).sum();
         if size > 500_000_000 {
             out.push(Rec {
-                color: C::YELLOW,
+                color: C::yellow(),
                 title: trf("{0} not opened for 6+ months", &[&fmt::n(unused.len() as u64, fmt::Noun::App)]),
                 text: trf("Together they take {0}. Uninstall the ones you do not need, with their leftovers.", &[&fmt::bytes(size)]),
                 button: tr("Review"),
@@ -243,7 +280,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         let size: u64 = o.iter().map(|x| x.size).sum();
         if size > 100_000_000 {
             out.push(Rec {
-                color: C::YELLOW,
+                color: C::yellow(),
                 title: trf("{0} left by removed apps", &[&fmt::bytes(size)]),
                 text: trf("{0} in your Library belong to apps that are no longer installed.", &[&fmt::n(o.len() as u64, fmt::Noun::Folder)]),
                 button: tr("Review"),
@@ -258,7 +295,7 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     if let Some(t) = g.targets.iter().find(|t| t.id == "trash") {
         if let Some(st) = t.stat.filter(|s| s.size > 1_000_000_000) {
             out.push(Rec {
-                color: C::GREEN,
+                color: C::green(),
                 title: trf("{0} in the Trash", &[&fmt::bytes(st.size)]),
                 text: tr("Deleted files still take space until the Trash is emptied.").into(),
                 button: tr("Open Cleanup"),
@@ -296,94 +333,90 @@ pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f3
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            let host = sysinfo::System::host_name().unwrap_or_default();
-            let os = sysinfo::System::long_os_version().unwrap_or_default();
-            w::header(ui, tr("Overview"), &format!("{host} · {os} · {}", trf("on for {0}", &[&fmt::duration(sysinfo::System::uptime())])));
+        w::centered(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                let host = sysinfo::System::host_name().unwrap_or_default();
+                let os = sysinfo::System::long_os_version().unwrap_or_default();
+                w::header(ui, tr("Overview"), &format!("{host} · {os} · {}", trf("on for {0}", &[&fmt::duration(sysinfo::System::uptime())])));
 
-            let s = g.snap.clone();
-            ui.columns(4, |cols| {
-                stat_card(
-                    &mut cols[0],
-                    "CPU",
-                    format!("{:.0}%", s.cpu_total),
-                    fmt::n(s.cpu_count as u64, fmt::Noun::Core),
-                    s.cpu_total / 100.0,
-                    Some(&g.cpu_hist),
-                );
-                let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
-                let pressure = match s.pressure {
-                    4 => tr("pressure: critical"),
-                    2 => tr("pressure: high"),
-                    _ => tr("pressure: normal"),
-                };
-                stat_card(
-                    &mut cols[1],
-                    tr("Memory"),
-                    fmt::bytes(s.mem_used),
-                    trf("of {0} · {1} · swap {2}", &[&fmt::bytes(s.mem_total), &pressure, &fmt::bytes(s.swap_used)]),
-                    if s.pressure >= 4 {
-                        1.0
-                    } else if s.pressure >= 2 {
-                        0.8
-                    } else {
-                        mem_r.min(0.7)
-                    },
-                    Some(&g.mem_hist),
-                );
-                if let Some((avail, total)) = w::data_volume(&g.disks) {
-                    let used = total.saturating_sub(avail);
+                let s = g.snap.clone();
+                ui.columns(4, |cols| {
                     stat_card(
-                        &mut cols[2],
-                        tr("Disk"),
-                        trf("{0} free", &[&fmt::bytes(avail)]),
-                        trf("{0} of {1} used", &[&fmt::bytes(used), &fmt::bytes(total)]),
-                        used as f32 / total.max(1) as f32,
+                        &mut cols[0],
+                        "CPU",
+                        format!("{:.0}%", s.cpu_total),
+                        fmt::n(s.cpu_count as u64, fmt::Noun::Core),
+                        s.cpu_total / 100.0,
+                        Some(&g.cpu_hist),
+                    );
+                    let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
+                    let pressure = match s.pressure {
+                        4 => tr("pressure: critical"),
+                        2 => tr("pressure: high"),
+                        _ => tr("pressure: normal"),
+                    };
+                    stat_card(
+                        &mut cols[1],
+                        tr("Memory"),
+                        fmt::bytes(s.mem_used),
+                        trf("of {0} · {1} · swap {2}", &[&fmt::bytes(s.mem_total), &pressure, &fmt::bytes(s.swap_used)]),
+                        if s.pressure >= 4 {
+                            1.0
+                        } else if s.pressure >= 2 {
+                            0.8
+                        } else {
+                            mem_r.min(0.7)
+                        },
+                        Some(&g.mem_hist),
+                    );
+                    if let Some((avail, total)) = w::data_volume(&g.disks) {
+                        let used = total.saturating_sub(avail);
+                        stat_card(
+                            &mut cols[2],
+                            tr("Disk"),
+                            trf("{0} free", &[&fmt::bytes(avail)]),
+                            trf("{0} of {1} used", &[&fmt::bytes(used), &fmt::bytes(total)]),
+                            used as f32 / total.max(1) as f32,
+                            None,
+                        );
+                    }
+                    let groups = s.groups();
+                    let apps = groups.iter().filter(|g| g.app.is_some()).count();
+                    stat_card(
+                        &mut cols[3],
+                        tr("Processes"),
+                        s.procs.len().to_string(),
+                        trf("{0} running", &[&fmt::n(apps as u64, fmt::Noun::App)]),
+                        0.0,
                         None,
                     );
-                }
-                let groups = s.groups();
-                let apps = groups.iter().filter(|g| g.app.is_some()).count();
-                stat_card(
-                    &mut cols[3],
-                    tr("Processes"),
-                    s.procs.len().to_string(),
-                    trf("{0} running", &[&fmt::n(apps as u64, fmt::Noun::App)]),
-                    0.0,
-                    None,
-                );
-            });
-
-            ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(tr("Recommendations")).size(17.0).strong());
-                let scanning = g.scan.as_ref().is_some_and(|s| !s.done()) || g.rescan.is_some();
-                if scanning || g.apps.is_none() || g.orphans.is_none() {
-                    ui.spinner();
-                    ui.label(RichText::new(tr("checking your Mac…")).color(C::dim(ui)));
-                }
-            });
-            ui.add_space(6.0);
-            let recs = recommendations(g);
-            if recs.is_empty() {
-                w::card(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.label(RichText::new(tr("✔ All good")).size(16.0).strong().color(C::GREEN));
-                    ui.label(tr("No problems found. MacPilot keeps checking while it is open."));
                 });
-            }
-            let mut action = None;
-            for (i, r) in recs.iter().enumerate() {
-                egui::Frame::new()
-                    .fill(C::card(ui))
-                    .corner_radius(10)
-                    .inner_margin(egui::Margin::same(12))
-                    .stroke(egui::Stroke::new(1.0, C::track(ui)))
-                    .show(ui, |ui| {
+
+                ui.add_space(14.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(tr("Recommendations")).size(17.0).strong());
+                    let scanning = g.scan.as_ref().is_some_and(|s| !s.done()) || g.rescan.is_some();
+                    if scanning || g.apps.is_none() || g.orphans.is_none() {
+                        ui.spinner();
+                        ui.label(RichText::new(tr("checking your Mac…")).color(C::dim(ui)));
+                    }
+                });
+                ui.add_space(6.0);
+                let recs = recommendations(g);
+                if recs.is_empty() {
+                    w::card(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.label(RichText::new(tr("✔ All good")).size(16.0).strong().color(C::green()));
+                        ui.label(tr("No problems found. MacPilot keeps checking while it is open."));
+                    });
+                }
+                let mut action = None;
+                for (i, r) in recs.iter().enumerate() {
+                    w::card_frame(ui).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 40.0), egui::Sense::hover());
-                            ui.painter().rect_filled(rect, 3, r.color);
+                            ui.painter().rect_filled(rect, if w::classic() { 0 } else { 3 }, r.color);
                             ui.vertical(|ui| {
                                 ui.set_max_width(ui.available_width() - 150.0);
                                 ui.label(RichText::new(&r.title).size(15.0).strong());
@@ -396,13 +429,14 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                             });
                         });
                     });
-                ui.add_space(6.0);
-            }
-            if let Some(i) = action {
-                if let Some(r) = recs.into_iter().nth(i) {
-                    (r.go)(g);
+                    ui.add_space(6.0);
                 }
-            }
+                if let Some(i) = action {
+                    if let Some(r) = recs.into_iter().nth(i) {
+                        (r.go)(g);
+                    }
+                }
+            });
         });
     });
 }

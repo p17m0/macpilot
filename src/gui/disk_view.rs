@@ -13,23 +13,26 @@ use crate::widgets::{self as w, C, Level};
 use crate::{Action, Confirm, DiskMode, Gui};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
-    if g.disk_mode != DiskMode::Dupes {
+    if !matches!(g.disk_mode, DiskMode::Dupes | DiskMode::Summary) {
         egui::Panel::right("disk_detail").resizable(true).default_size(360.0).min_size(300.0).frame(w::side_frame(ui)).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| detail(g, ui));
         });
     }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
-        header(g, ui);
-        ui.add_space(8.0);
-        nav(g, ui);
-        ui.add_space(6.0);
-        match g.disk_mode {
-            DiskMode::List => list(g, ui),
-            DiskMode::Map => map(g, ui),
-            DiskMode::Big => big(g, ui),
-            DiskMode::Stale => stale(g, ui),
-            DiskMode::Dupes => dupes(g, ui),
-        }
+        w::centered(ui, |ui| {
+            header(g, ui);
+            ui.add_space(8.0);
+            nav(g, ui);
+            ui.add_space(6.0);
+            match g.disk_mode {
+                DiskMode::Summary => summary(g, ui),
+                DiskMode::List => list(g, ui),
+                DiskMode::Map => map(g, ui),
+                DiskMode::Big => big(g, ui),
+                DiskMode::Stale => stale(g, ui),
+                DiskMode::Dupes => dupes(g, ui),
+            }
+        });
     });
 }
 
@@ -79,7 +82,7 @@ fn header(g: &mut Gui, ui: &mut Ui) {
                         ui.label(RichText::new(trf("updating… {0}", &[&fmt::n(n, fmt::Noun::File)])).color(C::dim(ui)));
                     }
                 } else if let Some(t) = sc.finished_in {
-                    ui.label(RichText::new("✔").color(C::GREEN));
+                    ui.label(RichText::new("✔").color(C::green()));
                     ui.label(trf(
                         "Scanned {0}: {1}, {2}, {3} s",
                         &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &format!("{:.1}", t.as_secs_f32())],
@@ -88,7 +91,7 @@ fn header(g: &mut Gui, ui: &mut Ui) {
                     ui.spinner();
                     ui.label(trf("{0}: scanning… {1}, {2}", &[&fmt::place(&sc.root), &fmt::n(files, fmt::Noun::File), &fmt::bytes(bytes)]));
                     if g.scan_stalled {
-                        ui.label(RichText::new(tr("· waiting for a macOS permission dialog")).color(C::YELLOW));
+                        ui.label(RichText::new(tr("· waiting for a macOS permission dialog")).color(C::yellow()));
                     }
                 }
                 if errs > 0 {
@@ -108,7 +111,7 @@ fn nav(g: &mut Gui, ui: &mut Ui) {
         let browsing = matches!(g.disk_mode, DiskMode::List | DiskMode::Map);
         if browsing {
             let up = g.cwd.parent().map(|p| p.to_path_buf());
-            if ui.add_enabled(up.is_some(), egui::Button::new(tr("‹ Up")).corner_radius(8)).clicked() {
+            if ui.add_enabled(up.is_some(), egui::Button::new(tr("‹ Up")).corner_radius(w::button_radius())).clicked() {
                 if let Some(p) = up {
                     g.go(p);
                 }
@@ -137,7 +140,7 @@ fn nav(g: &mut Gui, ui: &mut Ui) {
                     ui.label(RichText::new("›").color(C::dim(ui)));
                 }
                 let last = i + 1 == n;
-                let text = if last { RichText::new(name).strong() } else { RichText::new(name).color(C::ACCENT) };
+                let text = if last { RichText::new(name).strong() } else { RichText::new(name).color(C::accent()) };
                 if ui.add(egui::Button::new(text).frame(false)).clicked() && !last {
                     go = Some(p);
                 }
@@ -157,6 +160,7 @@ fn nav(g: &mut Gui, ui: &mut Ui) {
                     (DiskMode::Big, tr("Large files")),
                     (DiskMode::Map, tr("Map")),
                     (DiskMode::List, tr("List")),
+                    (DiskMode::Summary, tr("Summary")),
                 ],
             );
             if before != g.disk_mode && g.disk_mode == DiskMode::Dupes && g.dupes.is_none() {
@@ -168,11 +172,11 @@ fn nav(g: &mut Gui, ui: &mut Ui) {
 
 fn bar_color(s: u64) -> Color32 {
     if s >= 10_000_000_000 {
-        C::RED
+        C::red()
     } else if s >= 1_000_000_000 {
-        C::YELLOW
+        C::yellow()
     } else {
-        C::ACCENT
+        C::accent()
     }
 }
 
@@ -187,13 +191,13 @@ fn heads(h: &mut egui_extras::TableRow, names: &[&str]) {
 fn list(g: &mut Gui, ui: &mut Ui) {
     if let Some(e) = &g.entries_err {
         ui.add_space(20.0);
-        ui.label(RichText::new(trf("Could not open the folder: {0}", &[e])).color(C::RED));
+        ui.label(RichText::new(trf("Could not open the folder: {0}", &[e])).color(C::red()));
         return;
     }
     let total = g.dir_total().max(1);
     if !g.scan.as_ref().is_some_and(|s| s.covers(&g.cwd)) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("This folder is outside the scanned area — folder sizes are unknown.")).color(C::YELLOW));
+            ui.label(RichText::new(tr("This folder is outside the scanned area — folder sizes are unknown.")).color(C::yellow()));
             if ui.button(tr("Scan it")).clicked() {
                 let p = g.cwd.clone();
                 g.start_scan(p);
@@ -261,7 +265,7 @@ fn list(g: &mut Gui, ui: &mut Ui) {
                         ui.close();
                     }
                     ui.separator();
-                    if ui.add_enabled(safety != DelSafety::Blocked, egui::Button::new(RichText::new(tr("Move to Trash…")).color(C::RED))).clicked()
+                    if ui.add_enabled(safety != DelSafety::Blocked, egui::Button::new(RichText::new(tr("Move to Trash…")).color(C::red()))).clicked()
                     {
                         trash = Some(p.clone());
                         ui.close();
@@ -396,6 +400,12 @@ fn squarify(sizes: &[f64], rect: Rect) -> Vec<Rect> {
 }
 
 fn tile_color(name: &str, is_dir: bool, dark: bool) -> Color32 {
+    if w::classic() {
+        // Shades of gray, like a 1-bit screen with dither patterns.
+        let h = name.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+        let g = [255u8, 225, 200, 175][(h % 4) as usize];
+        return if dark { Color32::from_gray(255 - g) } else { Color32::from_gray(g) };
+    }
     if !is_dir {
         return if dark { Color32::from_rgb(70, 74, 82) } else { Color32::from_rgb(190, 194, 202) };
     }
@@ -469,6 +479,166 @@ fn map(g: &mut Gui, ui: &mut Ui) {
 // Not used lately
 // ---------------------------------------------------------------------------
 
+/// Where the whole disk goes (volumes, folders outside home, what MacPilot cannot see) and what changed lately.
+fn summary(g: &mut Gui, ui: &mut Ui) {
+    g.measure_outside();
+    let info = g.space.lock().unwrap().clone();
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        let Some(v) = info.volumes else {
+            w::waiting(ui, tr("Reading the disk…"));
+            return;
+        };
+        let home = g
+            .scan
+            .as_ref()
+            .filter(|s| s.root == macpilot::home() && (s.done() || s.cached_at.is_some()))
+            .and_then(|s| s.dir(&s.root))
+            .map(|d| d.size);
+        let outside: u64 = info.outside.iter().filter_map(|o| o.2).sum();
+        let outside_done = !info.outside.is_empty() && info.outside.iter().all(|o| o.2.is_some());
+        let hidden = home.map(|h| v.data.saturating_sub(h + outside));
+
+        // One bar for the whole disk.
+        let parts: Vec<(Color32, String, u64, String)> = [
+            (C::accent(), tr("Your home folder").to_string(), home.unwrap_or(0), tr("Everything the scan found in your folders.").to_string()),
+            (
+                C::yellow(),
+                tr("Apps and other folders").to_string(),
+                outside,
+                if outside_done { tr("/Applications, /Library, /opt, Homebrew and temporary files.").into() } else { tr("measuring…").into() },
+            ),
+            (
+                C::red(),
+                tr("Not visible to MacPilot").to_string(),
+                hidden.unwrap_or(0),
+                if g.full_disk_access {
+                    tr("System areas that only macOS can read.").into()
+                } else {
+                    tr("Mostly data of other apps (Docker and virtual machines can take tens of GB). Give Full Disk Access to see it.").into()
+                },
+            ),
+            (C::purple(), tr("macOS").to_string(), v.macos, tr("The system itself, updates and recovery. It cannot be cleaned.").to_string()),
+            (
+                Color32::from_rgb(142, 142, 160),
+                tr("Swap and sleep image").to_string(),
+                v.vm,
+                tr("Memory that did not fit into RAM. It shrinks after a restart.").to_string(),
+            ),
+        ]
+        .into_iter()
+        .filter(|p| p.2 > 0)
+        .collect();
+        w::card(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(
+                RichText::new(trf("{0} of {1} used · {2} free", &[&fmt::bytes(v.total - v.free), &fmt::bytes(v.total), &fmt::bytes(v.free)]))
+                    .strong()
+                    .size(15.0),
+            );
+            ui.add_space(6.0);
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(rect, 5, C::track(ui));
+            let mut x = rect.left();
+            for (color, _, size, _) in &parts {
+                let wdt = rect.width() * *size as f32 / v.total.max(1) as f32;
+                p.rect_filled(Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(wdt, rect.height())), 0, *color);
+                x += wdt;
+            }
+            ui.add_space(8.0);
+            for (color, label, size, hint) in parts.iter().chain(std::iter::once(&(C::track(ui), tr("Free").to_string(), v.free, String::new()))) {
+                ui.horizontal(|ui| {
+                    w::dot(ui, *color);
+                    fixed(ui, 230.0, RichText::new(label).strong());
+                    fixed(ui, 80.0, RichText::new(fmt::bytes(*size)));
+                    // Long hints are cut to the row; the full text is on hover.
+                    ui.add(egui::Label::new(RichText::new(hint).size(12.0).color(C::dim(ui))).truncate()).on_hover_text(hint);
+                });
+            }
+            if hidden.is_some_and(|h| h > 5_000_000_000) && !g.full_disk_access {
+                ui.add_space(6.0);
+                if ui.button(tr("Open Full Disk Access settings…")).clicked() {
+                    macpilot::open_full_disk_access_settings();
+                }
+            }
+            if !info.snapshots.is_empty() {
+                ui.add_space(6.0);
+                w::note(
+                    ui,
+                    C::accent(),
+                    &trf("{0} local Time Machine snapshots", &[&info.snapshots.len()]),
+                    tr("They keep deleted files for a while. macOS removes them by itself when space runs low."),
+                );
+            }
+        });
+
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("What changed in your home folder")).size(17.0).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let before = g.changes_days;
+                w::segmented(ui, &mut g.changes_days, &[(1, tr("1 day")), (7, tr("7 days")), (30, tr("30 days"))]);
+                if before != g.changes_days {
+                    g.changes = None;
+                }
+            });
+        });
+        ui.add_space(6.0);
+        w::card(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            match &g.changes {
+                None => {
+                    ui.label(RichText::new(tr("Waiting for the scan…")).color(C::dim(ui)));
+                }
+                Some((None, _)) => {
+                    let since = macpilot::space::first_summary().map(fmt::date).unwrap_or_else(|| tr("today").into());
+                    let text = trf(
+                        "MacPilot keeps a small daily summary of your home folder (history starts {0}). Changes appear from the next day.",
+                        &[&since],
+                    );
+                    ui.add(egui::Label::new(RichText::new(text).color(C::dim(ui))).wrap());
+                }
+                Some((Some(at), list)) => {
+                    ui.label(RichText::new(trf("Compared with {0}.", &[&fmt::date(*at)])).color(C::dim(ui)));
+                    ui.add_space(4.0);
+                    if list.is_empty() {
+                        ui.label(tr("Nothing grew or shrank by more than 300 MB."));
+                    }
+                    let mut open = None;
+                    for c in list.iter().take(12) {
+                        let d = c.delta();
+                        ui.horizontal(|ui| {
+                            let (sign, color) = if d > 0 { ("+", C::red()) } else { ("−", C::green()) };
+                            fixed(ui, 90.0, RichText::new(format!("{sign}{}", fmt::bytes(d.unsigned_abs()))).strong().color(color));
+                            let r = ui.add(egui::Label::new(RichText::new(fmt::path(&c.path)).color(C::accent())).sense(Sense::click()).truncate());
+                            if r.on_hover_text(tr("Open in the list")).clicked() {
+                                open = Some(c.path.clone());
+                            }
+                            ui.label(RichText::new(format!("{} → {}", fmt::bytes(c.old), fmt::bytes(c.new))).size(12.0).color(C::dim(ui)));
+                        });
+                    }
+                    if let Some(p) = open {
+                        g.disk_mode = DiskMode::List;
+                        if p.is_dir() {
+                            g.go(p);
+                        } else if let Some(parent) = p.parent() {
+                            g.go(parent.to_path_buf());
+                        }
+                    }
+                }
+            }
+        });
+    });
+}
+
+/// A left-aligned label in a column of fixed width.
+fn fixed(ui: &mut Ui, width: f32, text: RichText) {
+    ui.allocate_ui_with_layout(egui::vec2(width, 18.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_width(width);
+        ui.add(egui::Label::new(text).truncate());
+    });
+}
+
 fn stale(g: &mut Gui, ui: &mut Ui) {
     if !g.scan_ready() {
         w::waiting(ui, tr("Wait for the scan to finish to see what has not been used lately."));
@@ -497,7 +667,7 @@ fn stale(g: &mut Gui, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(RichText::new(trf("{0}: found {1}", &[&root, &fmt::n(g.stale.len() as u64, fmt::Noun::Item)])).color(C::dim(ui)));
-                ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::YELLOW));
+                ui.label(RichText::new(fmt::bytes(total)).size(24.0).strong().color(C::yellow()));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let label = if checked_n > 0 {
@@ -505,7 +675,7 @@ fn stale(g: &mut Gui, ui: &mut Ui) {
                 } else {
                     tr("Select items to remove").into()
                 };
-                if w::big_button(ui, &label, C::RED, checked_n > 0).clicked() {
+                if w::big_button(ui, &label, C::red(), checked_n > 0).clicked() {
                     let items: Vec<(PathBuf, u64, String)> =
                         g.stale.iter().filter(|i| g.stale_checked.contains(&i.path)).map(|i| (i.path.clone(), i.size, fmt::age_in(i.used))).collect();
                     ask_trash_many(g, items, tr("not used for {0}"));
@@ -605,7 +775,7 @@ pub fn name_with_parent(ui: &mut Ui, p: &Path, is_dir: bool) {
 fn dupes(g: &mut Gui, ui: &mut Ui) {
     let Some(ds) = g.dupes.clone() else {
         ui.add_space(20.0);
-        if w::big_button(ui, tr("Find duplicates"), C::ACCENT, true).clicked() {
+        if w::big_button(ui, tr("Find duplicates"), C::accent(), true).clicked() {
             g.start_dupes();
         }
         return;
@@ -645,14 +815,14 @@ fn dupes(g: &mut Gui, ui: &mut Ui) {
                 ui.label(
                     RichText::new(trf("{1}: {0}", &[&fmt::n(groups.len() as u64, fmt::Noun::DupGroup), &fmt::place(&ds.root)])).color(C::dim(ui)),
                 );
-                ui.label(RichText::new(trf("{0} can be freed", &[&fmt::bytes(wasted)])).size(24.0).strong().color(C::YELLOW));
+                ui.label(RichText::new(trf("{0} can be freed", &[&fmt::bytes(wasted)])).size(24.0).strong().color(C::yellow()));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let size: u64 = to_remove.iter().map(|(_, s)| s).sum();
                 if w::big_button(
                     ui,
                     &trf("Remove {0} · {1}", &[&fmt::n(to_remove.len() as u64, fmt::Noun::Copy), &fmt::bytes(size)]),
-                    C::RED,
+                    C::red(),
                     !to_remove.is_empty(),
                 )
                 .clicked()
@@ -706,7 +876,7 @@ fn dupes(g: &mut Gui, ui: &mut Ui) {
                         RichText::new(format!("{} × {}", fmt::n(gr.files.len() as u64, fmt::Noun::Copy), fmt::bytes(gr.size))).color(C::dim(ui)),
                     );
                     if gr.in_project {
-                        w::badge(ui, tr("in a project"), C::YELLOW)
+                        w::badge(ui, tr("in a project"), C::yellow())
                             .on_hover_text(tr("Copies inside git projects are part of the code; removing them could break the project."));
                     }
                 });
@@ -720,7 +890,7 @@ fn dupes(g: &mut Gui, ui: &mut Ui) {
                         ui.label(if keep { text.strong() } else { text.color(C::dim(ui)) });
                         ui.label(RichText::new(fmt::date(f.modified)).size(11.0).color(C::dim(ui)));
                         if keep {
-                            w::badge(ui, tr("keep"), C::GREEN);
+                            w::badge(ui, tr("keep"), C::green());
                         }
                         if ui.small_button("↗").on_hover_text(tr("Show in Finder")).clicked() {
                             macpilot::trash::reveal_in_finder(&f.path);
@@ -815,7 +985,7 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
         } else {
             tr("Probably no longer needed. If you are sure, move it to the Trash — it can be restored.")
         };
-        w::note(ui, C::YELLOW, &trf("Not used for {0}", &[&fmt::age_in(u)]), text);
+        w::note(ui, C::yellow(), &trf("Not used for {0}", &[&fmt::age_in(u)]), text);
     }
     ui.add_space(8.0);
     let (safety, why) = disk::deletion_safety(&path);
@@ -834,7 +1004,7 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
         if w::plain_button(ui, tr("Show in Finder")).clicked() {
             macpilot::trash::reveal_in_finder(&path);
         }
-        if w::big_button(ui, tr("Move to Trash…"), C::RED, safety != DelSafety::Blocked).on_disabled_hover_text(&why).clicked() {
+        if w::big_button(ui, tr("Move to Trash…"), C::red(), safety != DelSafety::Blocked).on_disabled_hover_text(&why).clicked() {
             ask_trash(g, &path);
         }
     });
