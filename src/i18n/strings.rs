@@ -634,6 +634,8 @@ pub static TABLE: &[(&str, &str, &str, &str, &str)] = &[
     ("Disk: {0} free of {1}", "Диск: свободно {0} из {1}", "Disque : {0} libres sur {1}", "Disco: {0} libres de {1}", "Festplatte: {0} frei von {1}"),
     ("Busiest: {0} — {1} CPU", "Больше всех грузит: {0} — {1}", "Le plus actif : {0} — {1} du CPU", "El más activo: {0} — {1} de CPU", "Am aktivsten: {0} — {1} CPU"),
     ("Nothing is using much CPU", "Процессор почти не загружен", "Rien n’utilise beaucoup le CPU", "Nada usa mucho la CPU", "Nichts lastet die CPU stark aus"),
+    ("CPU {0} · RAM {1}", "ЦП {0} · ОЗУ {1}", "CPU {0} · RAM {1}", "CPU {0} · RAM {1}", "CPU {0} · RAM {1}"),
+    ("MacPilot — CPU and memory use", "MacPilot — загрузка процессора и памяти", "MacPilot — utilisation du CPU et de la mémoire", "MacPilot — uso de CPU y memoria", "MacPilot — CPU- und Speicherauslastung"),
     ("Open MacPilot", "Открыть MacPilot", "Ouvrir MacPilot", "Abrir MacPilot", "MacPilot öffnen"),
     ("Quit MacPilot", "Завершить MacPilot", "Quitter MacPilot", "Salir de MacPilot", "MacPilot beenden"),
     ("Launch at login is switched off in System Settings", "Автозапуск выключен в Системных настройках", "L’ouverture à la connexion est désactivée dans Réglages Système", "El inicio al iniciar sesión está desactivado en Ajustes del Sistema", "Start bei der Anmeldung ist in den Systemeinstellungen ausgeschaltet"),
