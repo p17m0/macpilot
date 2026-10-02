@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- **Menu bar item you can recognize**: a gauge icon (it follows light and dark menu bars) and labeled values — "CPU 23% · RAM 81%" instead of bare numbers. Hovering shows "MacPilot — CPU and memory use".
+
 ## 0.6.0
 
 - **Design pass** after the Macintosh classics (Tognazzini's guidelines, Atkinson's pixels, Kare's icons):
