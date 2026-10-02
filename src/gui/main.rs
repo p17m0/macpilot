@@ -1206,8 +1206,14 @@ impl Gui {
         } else {
             lines.push(tr("Nothing is using much CPU").to_string());
         }
-        let title = format!("{:.0}% · {:.0}%", s.cpu_total, mem_r * 100.0);
-        mac::set_status(Some(mac::StatusInfo { title: &title, lines: &lines, open_label: tr("Open MacPilot"), quit_label: tr("Quit MacPilot") }));
+        let title = trf("CPU {0} · RAM {1}", &[&format!("{:.0}%", s.cpu_total), &format!("{:.0}%", mem_r * 100.0)]);
+        mac::set_status(Some(mac::StatusInfo {
+            title: &title,
+            tooltip: tr("MacPilot — CPU and memory use"),
+            lines: &lines,
+            open_label: tr("Open MacPilot"),
+            quit_label: tr("Quit MacPilot"),
+        }));
     }
 
     /// Home folder: show the last saved results at once and refresh them in the background.

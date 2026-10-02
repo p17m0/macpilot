@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, NSObject, NSObjectProtocol};
 use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSCellImagePosition, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
 use objc2_foundation::NSString;
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
@@ -58,8 +58,10 @@ fn menu_item(mtm: MainThreadMarker, title: &str, action: Option<objc2::runtime::
 
 /// What the menu bar item shows.
 pub struct StatusInfo<'a> {
-    /// Short text next to the icon, e.g. "23% · 81%".
+    /// Short text next to the icon, e.g. "CPU 23% · RAM 81%".
     pub title: &'a str,
+    /// Shown on hover, so it is clear the item belongs to MacPilot.
+    pub tooltip: &'a str,
     pub lines: &'a [String],
     pub open_label: &'a str,
     pub quit_label: &'a str,
@@ -103,6 +105,16 @@ pub fn set_status(info: Option<StatusInfo>) {
             // Without this, disabled lines stay grey but items without an action would be greyed too.
             menu.setAutoenablesItems(false);
             item.setMenu(Some(&menu));
+            if let Some(b) = item.button(mtm) {
+                // A template symbol (macOS 11+) tints itself for light and dark menu bars.
+                if let Some(img) = NSImage::imageWithSystemSymbolName_accessibilityDescription(&ns("gauge.medium"), Some(&ns("MacPilot")))
+                    .or_else(|| NSImage::imageWithSystemSymbolName_accessibilityDescription(&ns("speedometer"), Some(&ns("MacPilot"))))
+                {
+                    img.setTemplate(true);
+                    b.setImage(Some(&img));
+                    b.setImagePosition(NSCellImagePosition::ImageLeading);
+                }
+            }
             *cur = Some(StatusMenu { item, lines, open, quit, _target: target, title: String::new() });
         }
         let s = cur.as_mut().expect("status menu");
@@ -111,6 +123,9 @@ pub fn set_status(info: Option<StatusInfo>) {
                 b.setTitle(&ns(info.title));
             }
             s.title = info.title.to_string();
+        }
+        if let Some(b) = s.item.button(mtm) {
+            b.setToolTip(Some(&ns(info.tooltip)));
         }
         for (item, text) in s.lines.iter().zip(info.lines) {
             item.setTitle(&ns(text));
