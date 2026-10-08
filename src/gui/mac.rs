@@ -135,6 +135,13 @@ pub fn set_status(info: Option<StatusInfo>) {
     });
 }
 
+/// Quit the app (as ⌘Q does).
+pub fn quit() {
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSApplication::sharedApplication(mtm).terminate(None);
+    }
+}
+
 /// Hide the window and the Dock icon; MacPilot keeps running in the menu bar.
 pub fn hide_window() {
     let Some(mtm) = MainThreadMarker::new() else { return };

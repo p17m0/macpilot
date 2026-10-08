@@ -10,12 +10,15 @@ pub mod disk;
 pub mod dupes;
 pub mod fmt;
 pub mod i18n;
+pub mod net;
 pub mod plist;
 pub mod procs;
+pub mod sensors;
 pub mod settings;
 pub mod space;
 pub mod startup;
 pub mod trash;
+pub mod trashlog;
 pub mod update;
 
 pub use i18n::{tr, trf};

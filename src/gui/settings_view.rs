@@ -249,6 +249,33 @@ fn permissions(g: &Gui, ui: &mut Ui) {
 
 fn disk(g: &mut Gui, ui: &mut Ui) {
     group(ui, |ui| disk_rows(g, ui));
+    group(ui, |ui| auto_clean(g, ui));
+}
+
+/// Scheduled cleanup: off unless switched on here.
+fn auto_clean(g: &mut Gui, ui: &mut Ui) {
+    let mut days = g.settings.auto_clean_days;
+    let mut hint = tr(
+        "Caches of apps that are not running, logs and previews go to the Trash on their own. Nothing is erased: the space is freed when you empty the Trash.",
+    )
+    .to_string();
+    if days > 0 && !g.settings.file_access {
+        hint = format!("{hint} {}", tr("Waits until you allow MacPilot to look at your files."));
+    } else if days > 0 {
+        let next = g.settings.auto_clean_last + days * 86_400;
+        hint = format!("{hint} {}", trf("Next: {0}.", &[&macpilot::fmt::date(next.max(macpilot::disk::now_unix()))]));
+    }
+    row(ui, tr("Clean up on a schedule"), &hint, |ui| {
+        w::segmented(ui, &mut days, &[(0, tr("Never")), (7, tr("Weekly")), (30, tr("Monthly"))]);
+    });
+    if days != g.settings.auto_clean_days {
+        // The first run is a whole period away, not right now.
+        if g.settings.auto_clean_days == 0 {
+            g.settings.auto_clean_last = macpilot::disk::now_unix();
+        }
+        g.settings.auto_clean_days = days;
+        g.save_settings();
+    }
 }
 
 fn disk_rows(g: &mut Gui, ui: &mut Ui) {
@@ -296,22 +323,36 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
     let Some(_) = macpilot::update::repo() else { return };
     ui.add_space(w::sp::M);
     if let Some(u) = g.update.clone() {
+        let can_install = macpilot::update::replaceable_app().is_some();
         w::card(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(trf("MacPilot {0} is available", &[&u.version])).semibold().color(C::green()));
-                    ui.label(
-                        RichText::new(trf(
-                            "You have {0}. Download the new version and replace the app in Applications.",
+                    let text = if g.update_installing {
+                        tr("Downloading and checking the new version…").to_string()
+                    } else if can_install {
+                        trf(
+                            "You have {0}. MacPilot downloads the new version, checks it, replaces itself and opens again.",
                             &[&env!("CARGO_PKG_VERSION")],
-                        ))
-                        .callout()
-                        .color(C::dim(ui)),
-                    );
+                        )
+                    } else {
+                        trf("You have {0}. Download the new version and replace the app in Applications.", &[&env!("CARGO_PKG_VERSION")])
+                    };
+                    ui.label(RichText::new(text).callout().color(C::dim(ui)));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new(tr("Download")).color(egui::Color32::WHITE)).fill(C::accent())).clicked() {
+                    if g.update_installing {
+                        ui.spinner();
+                    } else if can_install {
+                        if ui.add(egui::Button::new(RichText::new(tr("Update and relaunch")).color(egui::Color32::WHITE)).fill(C::accent())).clicked()
+                        {
+                            g.install_update();
+                        }
+                        if ui.link(tr("Release page")).clicked() {
+                            let _ = std::process::Command::new("open").arg(&u.url).spawn();
+                        }
+                    } else if ui.add(egui::Button::new(RichText::new(tr("Download")).color(egui::Color32::WHITE)).fill(C::accent())).clicked() {
                         let _ = std::process::Command::new("open").arg(&u.url).spawn();
                     }
                 });

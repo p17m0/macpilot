@@ -84,6 +84,7 @@ pub enum SortKey {
     Cpu,
     Mem,
     Power,
+    Net,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -100,6 +101,8 @@ pub enum DiskMode {
 pub enum CleanMode {
     System,
     Dev,
+    /// What MacPilot moved to the Trash, with "Put Back".
+    History,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -140,8 +143,16 @@ impl Confirm {
 }
 
 pub enum Msg {
-    Trashed { paths: Vec<PathBuf>, size: u64, result: Result<(), String> },
-    Signalled { result: Result<(), String>, pids: Vec<u32>, sig: i32 },
+    Trashed {
+        paths: Vec<PathBuf>,
+        size: u64,
+        result: Result<(), String>,
+    },
+    Signalled {
+        result: Result<(), String>,
+        pids: Vec<u32>,
+        sig: i32,
+    },
     Measured(usize, DirStat),
     Apps(Vec<AppInfo>),
     Orphans(Vec<Orphan>),
@@ -150,6 +161,18 @@ pub enum Msg {
     StartupChanged(Result<(), String>),
     TrashEmptied(Result<(), String>),
     Update(Result<Option<macpilot::update::Release>, String>),
+    /// The new version is downloaded and checked (the path of the new app), or why not.
+    UpdateReady(Result<PathBuf, String>),
+    PutBack {
+        path: PathBuf,
+        at: i64,
+        result: Result<(), macpilot::trash::PutBackError>,
+    },
+    AutoCleaned {
+        paths: Vec<PathBuf>,
+        size: u64,
+        result: Result<(), String>,
+    },
 }
 
 pub struct Gui {
@@ -178,6 +201,16 @@ pub struct Gui {
     pub only_mine: bool,
     pub sel: Option<Sel>,
     pub focus_search: bool,
+
+    /// Network use per process (pid → rate), refreshed every 3 seconds.
+    pub net: Arc<Mutex<Arc<HashMap<u32, macpilot::net::Rate>>>>,
+    /// Temperatures and fans; `None` on Macs without readable sensors.
+    pub sensors: Arc<Mutex<Option<macpilot::sensors::Sensors>>>,
+    /// Journal of what went to the Trash through MacPilot.
+    pub trash_log: Vec<macpilot::trashlog::Entry>,
+    /// The new version is being downloaded.
+    pub update_installing: bool,
+    auto_clean_running: bool,
 
     // Battery
     pub power: Arc<Mutex<PowerInfo>>,
@@ -328,6 +361,33 @@ impl Gui {
                 }
             });
         }
+        // Network per process: two readings of `nettop` three seconds apart give the rates.
+        let net = Arc::new(Mutex::new(Arc::new(HashMap::new())));
+        {
+            let net = net.clone();
+            std::thread::spawn(move || {
+                macpilot::background_qos();
+                let mut meter = macpilot::net::Meter::default();
+                loop {
+                    let rates = meter.sample();
+                    *net.lock().unwrap() = Arc::new(rates);
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+            });
+        }
+        // Temperatures and fans.
+        let sensors = Arc::new(Mutex::new(None));
+        {
+            let sensors = sensors.clone();
+            std::thread::spawn(move || {
+                macpilot::background_qos();
+                let Some(smc) = macpilot::sensors::Smc::open() else { return };
+                loop {
+                    *sensors.lock().unwrap() = Some(smc.read());
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+            });
+        }
         // Battery: every 5 seconds; health (a slower call) every 5 minutes.
         let power = Arc::new(Mutex::new(PowerInfo::default()));
         {
@@ -413,6 +473,11 @@ impl Gui {
             space,
             changes_days: 7,
             changes: None,
+            net,
+            sensors,
+            trash_log: macpilot::trashlog::load(),
+            update_installing: false,
+            auto_clean_running: false,
             power,
             battery_hist: macpilot::battery::load_history(),
             battery_days: 1,
@@ -524,6 +589,8 @@ impl Gui {
                 self.start_dupes();
             }
             "dev" => self.clean_mode = CleanMode::Dev,
+            "history" => self.clean_mode = CleanMode::History,
+            "cleanup" => self.settings_tab = settings_view::SettingsTab::Disk,
             "leftovers" => self.apps_mode = AppsMode::Leftovers,
             "flat" => self.view = ProcView::Flat,
             _ => {}
@@ -655,6 +722,7 @@ impl Gui {
             }
         }
         self.log_battery();
+        self.auto_clean();
         self.alerts();
         if self.rescan_when_plugged && self.power.lock().unwrap().battery().is_some_and(|b| b.plugged) {
             self.rescan_when_plugged = false;
@@ -719,7 +787,10 @@ impl Gui {
             }
             Msg::TrashEmptied(r) => {
                 match r {
-                    Ok(()) => self.toast(tr("The Trash is empty."), Level::Ok),
+                    Ok(()) => {
+                        macpilot::trashlog::mark_emptied(&mut self.trash_log);
+                        self.toast(tr("The Trash is empty."), Level::Ok)
+                    }
                     Err(e) => self.toast(trf("Could not empty the Trash: {0}", &[&e]), Level::Danger),
                 }
                 self.remeasure_by_id("trash");
@@ -753,9 +824,133 @@ impl Gui {
                     }
                     Err(e) => self.toast(trf("Some items could not be moved to the Trash: {0}", &[&e]), Level::Danger),
                 }
+                self.journal(&paths, size);
                 self.after_trash(&paths);
             }
+            Msg::AutoCleaned { paths, size, result } => {
+                self.auto_clean_running = false;
+                if result.is_ok() && size > 0 {
+                    let text = trf("{0} of caches and logs are in the Trash. Empty it to free the space.", &[&fmt::bytes(size)]);
+                    self.toast(format!("{} {text}", tr("Scheduled cleanup done.")), Level::Ok);
+                    if self.settings.notifications {
+                        mac::notify("clean:auto", tr("Scheduled cleanup done."), &text);
+                    }
+                }
+                self.journal(&paths, size);
+                self.after_trash(&paths);
+            }
+            Msg::UpdateReady(r) => {
+                self.update_installing = false;
+                match r.and_then(|app| macpilot::update::install_on_quit(&app)) {
+                    // The helper swaps the app as soon as this process is gone, and opens it again.
+                    Ok(()) => mac::quit(),
+                    Err(e) => self.toast(trf("Could not update: {0}", &[&e]), Level::Danger),
+                }
+            }
+            Msg::PutBack { path, at, result } => {
+                use macpilot::trash::PutBackError as E;
+                match result {
+                    Ok(()) => {
+                        macpilot::trashlog::mark_restored(&mut self.trash_log, &path, at);
+                        self.toast(trf("Put back: {0}", &[&fmt::path(&path)]), Level::Ok);
+                        self.reload_dir();
+                    }
+                    Err(E::Occupied) => self.toast(trf("Something is already at {0}. Move it away first.", &[&fmt::path(&path)]), Level::Warn),
+                    Err(E::NotInTrash) => {
+                        self.toast(tr("It is not in the Trash any more."), Level::Warn);
+                        if let Some(e) = self.trash_log.iter_mut().find(|e| e.path == path && e.at == at) {
+                            e.state = macpilot::trashlog::State::Emptied;
+                        }
+                        macpilot::trashlog::save(&self.trash_log);
+                    }
+                    Err(E::Ambiguous(_)) => {
+                        self.toast(tr("Several items with this name are in the Trash. It is open now — use Put Back there."), Level::Warn);
+                        macpilot::trash::open_trash();
+                    }
+                    Err(E::Other(e)) => self.toast(trf("Could not put it back: {0}", &[&e]), Level::Danger),
+                }
+            }
         }
+    }
+
+    /// Write what really left its place into the journal (see the History tab of Cleanup).
+    fn journal(&mut self, paths: &[PathBuf], total: u64) {
+        let gone: Vec<(PathBuf, u64)> = paths
+            .iter()
+            .filter(|p| std::fs::symlink_metadata(p).is_err())
+            .map(|p| {
+                let known = self.scan.as_ref().and_then(|s| s.size_of(p)).map(|d| d.size);
+                (p.clone(), known.unwrap_or(if paths.len() == 1 { total } else { 0 }))
+            })
+            .collect();
+        if !gone.is_empty() {
+            macpilot::trashlog::record(&mut self.trash_log, gone, disk::now_unix());
+        }
+    }
+
+    /// Put an item of the journal back where it was.
+    pub fn put_back(&mut self, path: PathBuf, at: i64) {
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let result = macpilot::trash::put_back(&path);
+            let _ = tx.send(Msg::PutBack { path, at, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Download the new version, check it, and swap it in.
+    pub fn install_update(&mut self) {
+        let Some(release) = self.update.clone() else { return };
+        if self.update_installing {
+            return;
+        }
+        self.update_installing = true;
+        self.toast(tr("Downloading and checking the new version…"), Level::Ok);
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::UpdateReady(macpilot::update::download(&release)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Scheduled cleanup: caches (not of running apps) and logs go to the Trash every N days.
+    fn auto_clean(&mut self) {
+        let days = self.settings.auto_clean_days;
+        let now = disk::now_unix();
+        if days <= 0
+            || !self.settings.file_access
+            || self.auto_clean_running
+            || self.started.elapsed() < Duration::from_secs(120)
+            || now - self.settings.auto_clean_last < days * 86_400
+        {
+            return;
+        }
+        // Which caches belong to running apps is known only once the app list is there.
+        let Some(apps) = &self.apps else { return };
+        let running: Vec<(String, String)> = apps
+            .iter()
+            .filter(|a| macpilot::apps::is_running(&a.path, &self.snap))
+            .map(|a| (a.bundle_id.to_lowercase(), a.name.to_lowercase()))
+            .collect();
+        let busy = |name: &str| {
+            let n = name.to_lowercase();
+            running.iter().any(|(id, app)| (!id.is_empty() && (n == *id || n.starts_with(&format!("{id}.")))) || n == *app)
+        };
+        let paths = macpilot::clean::auto_paths(&self.targets, &busy);
+        self.settings.auto_clean_last = now;
+        self.save_settings();
+        if paths.is_empty() {
+            return;
+        }
+        self.auto_clean_running = true;
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            macpilot::background_qos();
+            let size = paths.iter().map(|p| disk::measure(p).size).sum();
+            let result = macpilot::trash::move_to_trash(&paths);
+            let _ = tx.send(Msg::AutoCleaned { paths, size, result });
+            ctx.request_repaint();
+        });
     }
 
     /// Update every list after items went to the Trash.
@@ -1201,6 +1396,11 @@ impl Gui {
         if let Some(b) = self.power.lock().unwrap().battery() {
             lines.push(battery_view::menu_line(b));
         }
+        if let Some(line) = self.sensors.lock().unwrap().as_ref().and_then(overview::sensors_line) {
+            lines.push(line);
+        }
+        let (down, up) = self.net.lock().unwrap().values().fold((0.0, 0.0), |a, r| (a.0 + r.down, a.1 + r.up));
+        lines.push(trf("Network: ↓ {0} · ↑ {1}", &[&fmt::rate(down), &fmt::rate(up)]));
         if let Some(p) = s.procs.iter().filter(|p| p.cpu >= 20.0).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
             lines.push(trf("Busiest: {0} — {1} CPU", &[&p.app_name().unwrap_or_else(|| p.name.clone()), &fmt::pct(p.cpu)]));
         } else {

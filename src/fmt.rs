@@ -84,11 +84,36 @@ pub fn pct(v: f32) -> String {
 }
 
 /// A whole percentage, spaced as the language wants: "42%", "42 %".
+/// "52 °C"
+pub fn temp(celsius: f32) -> String {
+    format!("{:.0}\u{00A0}°C", celsius)
+}
+
 pub fn pct0(v: f32) -> String {
     match lang() {
         Lang::En => format!("{v:.0}%"),
         Lang::Fr | Lang::De | Lang::Ru | Lang::Es => format!("{v:.0}\u{00A0}%"),
     }
+}
+
+/// Transfer speed: "1.2 MB/s", "340 КБ/с".
+pub fn rate(bytes_per_sec: f64) -> String {
+    let per = match lang() {
+        Lang::Ru => "/с",
+        _ => "/s",
+    };
+    format!("{}{per}", bytes(bytes_per_sec.max(0.0) as u64))
+}
+
+/// Fan speed: "1350 rpm", "1350 об/мин".
+pub fn rpm(v: f32) -> String {
+    let unit = match lang() {
+        Lang::Ru => "об/мин",
+        Lang::Fr => "tr/min",
+        Lang::De => "U/min",
+        _ => "rpm",
+    };
+    format!("{}\u{00A0}{unit}", count(v.max(0.0).round() as u64))
 }
 
 /// Power: "2.4 W", "0.05 W", "2,4 Вт".

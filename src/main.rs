@@ -15,7 +15,7 @@ use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
 fn help() -> String {
     format!(
-        "MacPilot {}\n\n{}\n  macpilot                 {}\n  macpilot disk [PATH]     {}\n  macpilot clean           {}\n  macpilot stale [DAYS]    {}\n  macpilot junk [DAYS]     {}\n  macpilot apps            {}\n  macpilot leftovers       {}\n  macpilot startup         {}\n  macpilot battery         {}\n  macpilot dupes [PATH]    {}\n\n{}\n  --lang en|fr|es|de|ru    {}\n",
+        "MacPilot {}\n\n{}\n  macpilot                 {}\n  macpilot disk [PATH]     {}\n  macpilot clean           {}\n  macpilot stale [DAYS]    {}\n  macpilot junk [DAYS]     {}\n  macpilot apps            {}\n  macpilot leftovers       {}\n  macpilot startup         {}\n  macpilot battery         {}\n  macpilot sensors         {}\n  macpilot net             {}\n  macpilot dupes [PATH]    {}\n\n{}\n  --lang en|fr|es|de|ru    {}\n",
         env!("CARGO_PKG_VERSION"),
         tr("Usage:"),
         tr("interactive terminal UI"),
@@ -27,6 +27,8 @@ fn help() -> String {
         tr("list leftovers of removed apps"),
         tr("list startup items"),
         tr("battery charge, health and what uses energy"),
+        tr("processor temperature and fans"),
+        tr("which apps use the network right now"),
         tr("find duplicate files"),
         tr("Options:"),
         tr("interface language"),
@@ -54,6 +56,8 @@ fn main() {
         "leftovers" => report_leftovers(),
         "startup" => report_startup(),
         "battery" => report_battery(),
+        "sensors" => report_sensors(),
+        "net" => report_net(),
         "dupes" => report_dupes(args.get(1).map(PathBuf::from).unwrap_or_else(macpilot::home), settings.dupes_min_mb),
         _ => {
             if !std::io::stdout().is_terminal() {
@@ -196,6 +200,58 @@ fn report_startup() {
             .collect::<Vec<_>>()
             .join(" ");
         println!("{:<8} {:<50} {:<18} {} {flags}", state, it.label, it.vendor, it.program);
+    }
+}
+
+fn report_sensors() {
+    let Some(smc) = macpilot::sensors::Smc::open() else {
+        println!("{}", tr("This Mac does not report its sensors."));
+        return;
+    };
+    let s = smc.read();
+    if let Some(t) = s.cpu {
+        let max = s.cpu_max.map(|m| format!(" ({} {})", tr("hottest core"), fmt::temp(m))).unwrap_or_default();
+        println!("CPU: {}{max}", fmt::temp(t));
+    }
+    if let Some(t) = s.gpu {
+        println!("GPU: {}", fmt::temp(t));
+    }
+    for (i, f) in s.fans.iter().enumerate() {
+        println!("{} {}: {} ({}–{})", tr("Fan"), i + 1, fmt::rpm(f.rpm), fmt::rpm(f.min), fmt::rpm(f.max));
+    }
+    if s.fans.is_empty() {
+        println!("{}", tr("No fans."));
+    }
+}
+
+/// Who uses the network right now: two readings three seconds apart.
+fn report_net() {
+    let mut meter = macpilot::net::Meter::default();
+    meter.sample();
+    std::thread::sleep(Duration::from_secs(3));
+    let rates = meter.sample();
+    let mut mon = procs::Monitor::new();
+    mon.refresh();
+    let mut rows: Vec<(String, macpilot::net::Rate)> = mon
+        .groups()
+        .into_iter()
+        .map(|g| {
+            let mut sum = macpilot::net::Rate::default();
+            for r in g.pids.iter().filter_map(|p| rates.get(p)) {
+                sum.down += r.down;
+                sum.up += r.up;
+                sum.received += r.received;
+                sum.sent += r.sent;
+            }
+            (g.label, sum)
+        })
+        .filter(|(_, r)| r.received + r.sent > 0)
+        .collect();
+    rows.sort_by(|a, b| b.1.total().total_cmp(&a.1.total()).then((b.1.received + b.1.sent).cmp(&(a.1.received + a.1.sent))));
+    println!("{:<34} {:>12} {:>12} {:>12} {:>12}", tr("App"), "↓", "↑", tr("Received"), tr("Sent"));
+    for (name, r) in rows.iter().take(25) {
+        let name: String = name.chars().take(34).collect();
+        println!("{name:<34} {:>12} {:>12} {:>12} {:>12}", fmt::rate(r.down), fmt::rate(r.up), fmt::bytes(r.received), fmt::bytes(r.sent));
     }
 }
 

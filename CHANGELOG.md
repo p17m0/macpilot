@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- **Network per app**: a *Network* column on the Processes page (sortable; hover for download, upload and totals), the overall traffic in the menu bar menu, and `macpilot net` in the terminal.
+- **Sensors**: processor temperature and fan speed on the Overview and in the menu bar menu, a recommendation when the processor is very hot, and `macpilot sensors`.
+- **Cleanup → History**: everything MacPilot moved to the Trash in the last 90 days — when, what and how much — with *Put Back* while it is still in the Trash.
+- **Update inside the app**: *Update and relaunch* — on the Overview as soon as a new version is out, and in Settings — downloads the new release, checks its SHA-256 and code signature, replaces the app and opens it again (the old app is restored if anything fails). Releases without a Developer ID signature are a different app to macOS, so it may ask for permissions again.
+- **Cleanup on a schedule** (off by default; Settings → Disk and Cleanup → weekly or monthly): caches of apps that are not running, logs and previews go to the Trash. Apple's caches and anything not marked *safe* are never touched, and everything shows up in History.
+
 ## 0.6.1
 
 - **Menu bar item you can recognize**: a gauge icon (it follows light and dark menu bars) and labeled values — "CPU 23% · RAM 81%" instead of bare numbers. Hovering shows "MacPilot — CPU and memory use".

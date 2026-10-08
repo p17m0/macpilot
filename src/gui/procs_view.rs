@@ -31,9 +31,24 @@ fn matches(g: &Gui, p: &ProcInfo) -> bool {
         || p.cmd.to_lowercase().contains(&f)
 }
 
-fn cmp_procs(key: SortKey, desc: bool) -> impl Fn(&ProcInfo, &ProcInfo) -> std::cmp::Ordering {
+type Net = std::sync::Arc<std::collections::HashMap<u32, macpilot::net::Rate>>;
+
+/// Bytes per second, both directions, of these processes together.
+fn net_of(net: &Net, pids: &[u32]) -> macpilot::net::Rate {
+    let mut sum = macpilot::net::Rate::default();
+    for r in pids.iter().filter_map(|p| net.get(p)) {
+        sum.down += r.down;
+        sum.up += r.up;
+        sum.received += r.received;
+        sum.sent += r.sent;
+    }
+    sum
+}
+
+fn cmp_procs(key: SortKey, desc: bool, net: Net) -> impl Fn(&ProcInfo, &ProcInfo) -> std::cmp::Ordering {
     move |a, b| {
         let o = match key {
+            SortKey::Net => net_of(&net, &[a.pid]).total().total_cmp(&net_of(&net, &[b.pid]).total()).then(a.mem.cmp(&b.mem)),
             SortKey::Cpu => a.cpu.total_cmp(&b.cpu).then(a.mem.cmp(&b.mem)),
             SortKey::Mem | SortKey::Count => a.mem.cmp(&b.mem),
             SortKey::Power => a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)),
@@ -46,7 +61,8 @@ fn cmp_procs(key: SortKey, desc: bool) -> impl Fn(&ProcInfo, &ProcInfo) -> std::
 
 fn build_rows(g: &Gui) -> Vec<Row> {
     let s = &g.snap;
-    let cmp = cmp_procs(g.sort, g.sort_desc);
+    let net = g.net.lock().unwrap().clone();
+    let cmp = cmp_procs(g.sort, g.sort_desc, net.clone());
     match g.view {
         ProcView::Flat => {
             let mut v: Vec<&ProcInfo> = s.procs.iter().filter(|p| matches(g, p)).collect();
@@ -74,6 +90,7 @@ fn build_rows(g: &Gui) -> Vec<Row> {
                     SortKey::Cpu => a.cpu.total_cmp(&b.cpu),
                     SortKey::Mem => a.mem.cmp(&b.mem),
                     SortKey::Power => a.power.unwrap_or(0.0).total_cmp(&b.power.unwrap_or(0.0)),
+                    SortKey::Net => net_of(&net, &a.pids).total().total_cmp(&net_of(&net, &b.pids).total()).then(a.mem.cmp(&b.mem)),
                     SortKey::Count | SortKey::Pid => a.pids.len().cmp(&b.pids.len()),
                     SortKey::Name => b.label.to_lowercase().cmp(&a.label.to_lowercase()),
                 };
@@ -141,7 +158,7 @@ fn sort_header(g: &mut Gui, ui: &mut Ui, label: &str, key: SortKey) {
             g.sort_desc = !g.sort_desc;
         } else {
             g.sort = key;
-            g.sort_desc = matches!(key, SortKey::Cpu | SortKey::Mem | SortKey::Count | SortKey::Power);
+            g.sort_desc = matches!(key, SortKey::Cpu | SortKey::Mem | SortKey::Count | SortKey::Power | SortKey::Net);
         }
     }
     r.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -161,6 +178,7 @@ enum CtxAction {
 fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
     let snap = g.snap.clone();
     let ports = g.ports.lock().unwrap().clone();
+    let net = g.net.lock().unwrap().clone();
     let max_mem = rows
         .iter()
         .map(|r| match r {
@@ -175,19 +193,21 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
     let apps = g.view == ProcView::Apps;
     let mut tb = TableBuilder::new(ui).striped(true).sense(Sense::click()).cell_layout(egui::Layout::left_to_right(egui::Align::Center));
     tb = if apps {
-        tb.column(Column::remainder().at_least(200.0).clip(true))
-            .column(Column::exact(84.0))
-            .column(Column::exact(70.0))
+        tb.column(Column::remainder().at_least(160.0).clip(true))
             .column(Column::exact(76.0))
-            .column(Column::exact(150.0))
+            .column(Column::exact(66.0))
+            .column(Column::exact(72.0))
+            .column(Column::exact(88.0))
+            .column(Column::exact(118.0))
             .column(Column::exact(84.0))
     } else {
-        tb.column(Column::remainder().at_least(200.0).clip(true))
+        tb.column(Column::remainder().at_least(160.0).clip(true))
             .column(Column::exact(64.0))
             .column(Column::exact(90.0).clip(true))
             .column(Column::exact(64.0))
-            .column(Column::exact(80.0))
-            .column(Column::exact(150.0))
+            .column(Column::exact(72.0))
+            .column(Column::exact(88.0))
+            .column(Column::exact(118.0))
             .column(Column::exact(82.0))
             .column(Column::exact(96.0))
     };
@@ -197,6 +217,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
             h.col(|ui| sort_header(g, ui, tr("Processes"), SortKey::Count));
             h.col(|ui| sort_header(g, ui, "CPU", SortKey::Cpu));
             h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
+            h.col(|ui| sort_header(g, ui, tr("Network"), SortKey::Net));
             h.col(|ui| sort_header(g, ui, tr("Memory"), SortKey::Mem));
             h.col(|ui| plain_header(ui, tr("Safety")));
         } else {
@@ -205,6 +226,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
             h.col(|ui| plain_header(ui, tr("User")));
             h.col(|ui| sort_header(g, ui, "CPU", SortKey::Cpu));
             h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
+            h.col(|ui| sort_header(g, ui, tr("Network"), SortKey::Net));
             h.col(|ui| sort_header(g, ui, tr("Memory"), SortKey::Mem));
             h.col(|ui| plain_header(ui, tr("Status")));
             h.col(|ui| plain_header(ui, tr("Safety")));
@@ -229,6 +251,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                     ui.label(RichText::new(fmt::pct(gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
                 });
                 row.col(|ui| power_cell(ui, gr.power));
+                row.col(|ui| net_cell(ui, net_of(&net, &gr.pids)));
                 row.col(|ui| mem_cell(ui, gr.mem, max_mem));
                 row.col(|ui| {
                     // Only what is not simply yours is marked: the exceptions stand out.
@@ -267,6 +290,7 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                     ui.label(RichText::new(fmt::pct(p.cpu)).color(w::cpu_color(ui, p.cpu)));
                 });
                 row.col(|ui| power_cell(ui, p.power));
+                row.col(|ui| net_cell(ui, net_of(&net, &[p.pid])));
                 row.col(|ui| mem_cell(ui, p.mem, max_mem));
                 row.col(|ui| {
                     if p.stopped {
@@ -324,6 +348,25 @@ fn power_cell(ui: &mut Ui, w: Option<f32>) {
     }
 }
 
+/// Network traffic right now; the hover tells the direction and how much went through since the process started.
+fn net_cell(ui: &mut Ui, r: macpilot::net::Rate) {
+    let total = r.total();
+    let label = if total >= 1.0 {
+        let color = if total >= 5_000_000.0 { C::yellow() } else { C::text(ui) };
+        ui.label(RichText::new(fmt::rate(total)).color(color))
+    } else {
+        ui.label(RichText::new(if r.received + r.sent > 0 { "0" } else { "—" }).color(C::dim(ui)))
+    };
+    if r.received + r.sent > 0 {
+        label.on_hover_text(format!(
+            "↓ {} · ↑ {}\n{}",
+            fmt::rate(r.down),
+            fmt::rate(r.up),
+            trf("In total: {0} received, {1} sent", &[&fmt::bytes(r.received), &fmt::bytes(r.sent)])
+        ));
+    }
+}
+
 fn ctx_menu(ui: &mut Ui, sel: &Sel, is_app: bool, out: &mut Option<(Sel, CtxAction)>) {
     let stop = if is_app { tr("Quit app (like ⌘Q)") } else { tr("Stop (gently)") };
     let items = [
@@ -350,7 +393,7 @@ fn mem_cell(ui: &mut Ui, mem: u64, max: u64) {
     } else {
         C::accent()
     };
-    w::bar(ui, (mem as f64 / max as f64) as f32, egui::vec2(64.0, 5.0), color.gamma_multiply(0.85));
+    w::bar(ui, (mem as f64 / max as f64) as f32, egui::vec2(34.0, 5.0), color.gamma_multiply(0.85));
 }
 
 // ---------------------------------------------------------------------------

@@ -41,6 +41,10 @@ pub struct Settings {
     pub check_updates: bool,
     /// macOS notifications about problems (a stuck app, a full disk, the battery).
     pub notifications: bool,
+    /// Clean caches and logs by itself every this many days (0 = never).
+    pub auto_clean_days: i64,
+    /// When the scheduled cleanup last ran (unix seconds).
+    pub auto_clean_last: i64,
     /// The user agreed that MacPilot reads the home folder (Disk, Cleanup). Asked on first use.
     pub file_access: bool,
     /// Folders MacPilot never opens: any folder, "~/…" for ones inside the home folder.
@@ -60,6 +64,8 @@ impl Default for Settings {
             menu_bar: true,
             check_updates: true,
             notifications: true,
+            auto_clean_days: 0,
+            auto_clean_last: 0,
             file_access: false,
             excluded: Vec::new(),
         }
@@ -100,6 +106,8 @@ impl Settings {
                 "menu_bar" => s.menu_bar = v != "false",
                 "check_updates" => s.check_updates = v != "false",
                 "notifications" => s.notifications = v != "false",
+                "auto_clean_days" => s.auto_clean_days = v.parse().unwrap_or(0),
+                "auto_clean_last" => s.auto_clean_last = v.parse().unwrap_or(0),
                 "file_access" => s.file_access = v == "true",
                 // One folder per line: paths may contain commas.
                 "excluded" => s.excluded.push(v.to_string()),
@@ -117,7 +125,7 @@ impl Settings {
             Theme::Dark => "dark",
         };
         let text = format!(
-            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\nfile_access = {}\n{}",
+            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\nauto_clean_days = {}\nauto_clean_last = {}\nfile_access = {}\n{}",
             self.lang.map(|l| l.code()).unwrap_or("system"),
             if self.style == UiStyle::Classic { "classic" } else { "standard" },
             self.stale_days,
@@ -127,6 +135,8 @@ impl Settings {
             self.menu_bar,
             self.check_updates,
             self.notifications,
+            self.auto_clean_days,
+            self.auto_clean_last,
             self.file_access,
             self.excluded.iter().map(|e| format!("excluded = {e}\n")).collect::<String>()
         );

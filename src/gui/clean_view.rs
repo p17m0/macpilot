@@ -24,16 +24,93 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                 tr("Cleanup"),
                 "",
                 |ui| {
-                    w::segmented(ui, &mut g.clean_mode, &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk"))]);
+                    w::segmented(
+                        ui,
+                        &mut g.clean_mode,
+                        &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk")), (CleanMode::History, tr("History"))],
+                    );
                 },
                 |_| {},
             );
             match g.clean_mode {
                 CleanMode::System => system(g, ui),
                 CleanMode::Dev => dev(g, ui),
+                CleanMode::History => history(g, ui),
             }
         });
     });
+}
+
+/// What MacPilot moved to the Trash, newest first, with "Put Back" while it is still there.
+fn history(g: &mut Gui, ui: &mut Ui) {
+    use macpilot::trashlog::State;
+    let in_trash: u64 = g.trash_log.iter().filter(|e| e.state == State::InTrash).map(|e| e.size).sum();
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.label(RichText::new(tr("Moved to the Trash by MacPilot and still there")).color(C::dim(ui)));
+            ui.label(RichText::new(fmt::bytes(in_trash)).metric().color(C::text(ui)));
+            ui.label(RichText::new(tr("Kept for 90 days. Anything still in the Trash can be put back where it was.")).color(C::dim(ui)));
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(tr("Open the Trash")).clicked() {
+                macpilot::trash::open_trash();
+            }
+        });
+    });
+    ui.add_space(w::sp::M);
+    if g.trash_log.is_empty() {
+        w::empty(ui, tr("Nothing yet. Everything MacPilot moves to the Trash will be listed here."));
+        return;
+    }
+    let mut back: Option<(PathBuf, i64)> = None;
+    let log = &g.trash_log;
+    TableBuilder::new(ui)
+        .striped(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .column(Column::exact(110.0))
+        .column(Column::remainder().at_least(200.0).clip(true))
+        .column(Column::exact(90.0))
+        .column(Column::exact(150.0))
+        .header(24.0, |mut h| {
+            for t in [tr("When"), tr("What"), tr("Size"), ""] {
+                h.col(|ui| {
+                    ui.label(RichText::new(t).semibold().color(C::dim(ui)));
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(30.0, log.len(), |mut row| {
+                // Newest first.
+                let e = &log[log.len() - 1 - row.index()];
+                let dim = e.state != State::InTrash;
+                row.col(|ui| {
+                    ui.label(RichText::new(fmt::date(e.at)).color(C::dim(ui))).on_hover_text(fmt::ago(e.at));
+                });
+                row.col(|ui| {
+                    let color = if dim { C::dim(ui) } else { C::text(ui) };
+                    ui.label(RichText::new(fmt::path(&e.path)).color(color)).on_hover_text(e.path.to_string_lossy());
+                });
+                row.col(|ui| {
+                    ui.label(RichText::new(if e.size > 0 { fmt::bytes(e.size) } else { "—".into() }).color(C::dim(ui)));
+                });
+                row.col(|ui| match e.state {
+                    State::InTrash => {
+                        if ui.button(tr("Put Back")).on_hover_text(tr("Move it from the Trash to where it was")).clicked() {
+                            back = Some((e.path.clone(), e.at));
+                        }
+                    }
+                    State::Restored => {
+                        ui.label(RichText::new(tr("put back")).color(C::green()));
+                    }
+                    State::Emptied => {
+                        ui.label(RichText::new(tr("Trash emptied")).color(C::dim(ui)));
+                    }
+                });
+            });
+        });
+    if let Some((path, at)) = back {
+        g.put_back(path, at);
+    }
 }
 
 fn system(g: &mut Gui, ui: &mut Ui) {

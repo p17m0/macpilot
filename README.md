@@ -50,9 +50,9 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 ## Features
 
-**Overview.** CPU, memory pressure, swap and disk at a glance, plus recommendations with one-click actions. For example: an app stuck spawning thousands of processes, known adware in your startup items, gigabytes of caches, or old build folders.
+**Overview.** CPU (with its temperature and fan speed), memory pressure, swap and disk at a glance, plus recommendations with one-click actions. For example: an app stuck spawning thousands of processes, known adware in your startup items, gigabytes of caches, or old build folders.
 
-**Processes.** Group processes by app (all Chrome helpers in one row), as a flat list, or as a tree. Each process comes with an explanation of what it is (about 100 macOS services are described), whether it is safe to stop, and its open network ports. Apps quit gracefully like ⌘Q, other processes get SIGTERM. You can also force quit or pause a process. Vital macOS processes cannot be stopped at all, and system processes require you to type “yes”.
+**Processes.** Group processes by app (all Chrome helpers in one row), as a flat list, or as a tree. Each process comes with an explanation of what it is (about 100 macOS services are described), whether it is safe to stop, and its open network ports. A *Network* column shows how much each app sends and receives right now. Apps quit gracefully like ⌘Q, other processes get SIGTERM. You can also force quit or pause a process. Vital macOS processes cannot be stopped at all, and system processes require you to type “yes”.
 
 **Battery.** Charge, time left and the power being drawn right now; health and cycles as System Settings reports them; temperature; a 24-hour and 7-day charge history with the average drain per hour. It lists the apps using energy now (in watts) and what keeps the Mac awake, and warns when the battery needs service or runs hot. The Processes page has an *Energy* column too.
 
@@ -66,6 +66,8 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Cleanup.**
 - **System junk**: app caches, logs, Xcode data, iOS updates, Mail downloads, package-manager caches (npm, pnpm, Yarn, Cargo, Gradle, Homebrew…). You can also empty the Trash from here.
+- **History**: everything MacPilot moved to the Trash in the last 90 days, with *Put Back* while it is still there.
+- **On a schedule** (off by default, Settings → Disk and Cleanup): weekly or monthly, caches of apps that are not running, logs and previews go to the Trash on their own.
 - **Developer junk**: `node_modules`, `target`, `build`, `.venv`, `Pods`, DerivedData and more, in every project. It shows when each *project itself* was last changed, so builds of old projects are easy to spot.
 
 **Apps.** Uninstall apps together with the files they leave in `~/Library`, like AppCleaner. It also finds what apps you already removed left behind — in Application Support, Caches, Containers, Preferences, Logs, WebKit, cookies and more, by bundle id and by the app's name — grouped per app. Apple's data, installed apps' helpers and shared updaters are never listed; containers that may hold your documents are marked.
@@ -74,7 +76,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Apps (drag and drop).** Drop any `.app` on the window to uninstall it with its leftovers, even from Downloads or a disk image. Drop a file or folder to find it on the Disk page.
 
-**Menu bar.** CPU and memory in the menu bar, with disk space and the busiest app in its menu. Closing the window keeps MacPilot there; ⌘Q quits.
+**Menu bar.** CPU and memory in the menu bar, with disk space, temperature, network traffic and the busiest app in its menu. Closing the window keeps MacPilot there; ⌘Q quits.
 
 **Fast start.** The last scan of your home folder is saved (a compact ~7 MB cache), so results appear instantly at launch while a fresh scan runs in the background.
 
@@ -82,7 +84,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Notifications.** Only for real problems: an app stuck spawning hundreds of processes, a nearly full disk, a hot battery, or an app draining the battery. A click opens the right page; you can turn them off in Settings.
 
-**Updates.** Once a day MacPilot asks GitHub for the latest release and shows a note in Settings. Nothing else is sent, and you can turn it off.
+**Updates.** Once a day MacPilot asks GitHub for the latest release and shows a note in Settings. *Update and relaunch* downloads it, checks the checksum and the signature, and replaces the app. Nothing else is sent, and you can turn the check off.
 
 **Accessibility.** Works with VoiceOver.
 
@@ -156,6 +158,8 @@ macpilot apps            list installed apps by size and last use
 macpilot leftovers       list leftovers of removed apps
 macpilot startup         list startup items
 macpilot battery         battery charge, health and what uses energy
+macpilot sensors         processor temperature and fans
+macpilot net             which apps use the network right now
 macpilot dupes [PATH]    find duplicate files
 macpilot --lang fr       any command in another language (en, fr, es, de, ru)
 ```

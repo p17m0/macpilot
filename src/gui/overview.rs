@@ -69,9 +69,50 @@ fn battery_recs(g: &Gui, groups: &[macpilot::procs::AppGroup], out: &mut Vec<Rec
     }
 }
 
+/// "CPU 52 °C · fans 1 400 rpm" for the menu bar menu.
+pub fn sensors_line(s: &macpilot::sensors::Sensors) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(t) = s.cpu {
+        parts.push(format!("CPU {}", fmt::temp(t)));
+    }
+    if let Some(t) = s.gpu {
+        parts.push(format!("GPU {}", fmt::temp(t)));
+    }
+    if !s.fans.is_empty() {
+        let fastest = s.fans.iter().map(|f| f.rpm).fold(0.0, f32::max);
+        parts.push(if fastest < 1.0 { tr("fans are off").to_string() } else { trf("fans {0}", &[&fmt::rpm(fastest)]) });
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 fn recommendations(g: &Gui) -> Vec<Rec> {
     let mut out = Vec::new();
     let s = &g.snap;
+
+    if let Some(u) = &g.update {
+        let can_install = macpilot::update::replaceable_app().is_some();
+        let text = if g.update_installing {
+            tr("Downloading and checking the new version…").to_string()
+        } else if can_install {
+            trf("You have {0}. MacPilot downloads the new version, checks it, replaces itself and opens again.", &[&env!("CARGO_PKG_VERSION")])
+        } else {
+            trf("You have {0}. Download the new version and replace the app in Applications.", &[&env!("CARGO_PKG_VERSION")])
+        };
+        let url = u.url.clone();
+        out.push(Rec {
+            color: C::green(),
+            title: trf("MacPilot {0} is available", &[&u.version]),
+            text,
+            button: if can_install { tr("Update and relaunch") } else { tr("Download") },
+            go: Box::new(move |g| {
+                if can_install {
+                    g.install_update();
+                } else {
+                    let _ = std::process::Command::new("open").arg(&url).spawn();
+                }
+            }),
+        });
+    }
 
     if !g.settings.file_access {
         out.push(Rec {
@@ -108,6 +149,21 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
             text,
             button: tr("Open settings"),
             go: Box::new(|_| macpilot::open_full_disk_access_settings()),
+        });
+    }
+
+    let hot = g.sensors.lock().unwrap().as_ref().and_then(|s| s.cpu_max).filter(|t| *t >= 95.0);
+    if let Some(t) = hot {
+        out.push(Rec {
+            color: C::red(),
+            title: trf("The processor is very hot: {0}", &[&fmt::temp(t)]),
+            text: tr("macOS slows the Mac down at this temperature. See which apps load the processor and quit the ones you do not need.").into(),
+            button: tr("Show processes"),
+            go: Box::new(|g| {
+                g.sort = crate::SortKey::Cpu;
+                g.sort_desc = true;
+                g.go_page(Page::Procs);
+            }),
         });
     }
 
@@ -354,15 +410,19 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                 w::header(ui, tr("Overview"), &format!("{host} · {os} · {}", trf("on for {0}", &[&fmt::duration(sysinfo::System::uptime())])));
 
                 let s = g.snap.clone();
+                // "12 cores · 52 °C · fans 1 400 rpm"
+                let mut cpu_sub = fmt::n(s.cpu_count as u64, fmt::Noun::Core);
+                if let Some(sen) = g.sensors.lock().unwrap().as_ref() {
+                    if let Some(t) = sen.cpu {
+                        cpu_sub += &format!(" · {}", fmt::temp(t));
+                    }
+                    let fastest = sen.fans.iter().map(|f| f.rpm).fold(0.0, f32::max);
+                    if fastest >= 1.0 {
+                        cpu_sub += &format!(" · {}", trf("fans {0}", &[&fmt::rpm(fastest)]));
+                    }
+                }
                 ui.columns(4, |cols| {
-                    stat_card(
-                        &mut cols[0],
-                        "CPU",
-                        fmt::pct0(s.cpu_total),
-                        fmt::n(s.cpu_count as u64, fmt::Noun::Core),
-                        s.cpu_total / 100.0,
-                        Some(&g.cpu_hist),
-                    );
+                    stat_card(&mut cols[0], "CPU", fmt::pct0(s.cpu_total), cpu_sub, s.cpu_total / 100.0, Some(&g.cpu_hist));
                     let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
                     let pressure = match s.pressure {
                         4 => tr("pressure: critical"),

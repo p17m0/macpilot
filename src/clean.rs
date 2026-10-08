@@ -150,3 +150,60 @@ pub fn measure_all(targets: &[Target], tx: Sender<(usize, DirStat)>) {
         }
     });
 }
+
+/// What the scheduled cleanup touches: only things that are recreated by themselves and that
+/// nobody misses — app caches, logs, preview and simulator caches, the npm download cache.
+pub const AUTO_IDS: &[&str] = &["caches", "logs", "previews", "simcache", "npm"];
+
+/// Which entries of a target the scheduled cleanup takes. In the app caches it leaves alone
+/// Apple's own caches and those of running apps (`busy` says whether a name belongs to one):
+/// removing a cache under a running app can make it misbehave until restarted.
+fn auto_pick(target_id: &str, names: Vec<String>, busy: &dyn Fn(&str) -> bool) -> Vec<String> {
+    names
+        .into_iter()
+        .filter(|n| {
+            if target_id != "caches" {
+                return true;
+            }
+            let l = n.to_lowercase();
+            !(l.starts_with("com.apple.") || l == "macpilot" || l == "cloudkit" || busy(n))
+        })
+        .collect()
+}
+
+/// Everything the scheduled cleanup would move to the Trash right now.
+pub fn auto_paths(targets: &[Target], busy: &dyn Fn(&str) -> bool) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for t in targets.iter().filter(|t| AUTO_IDS.contains(&t.id) && t.kind == Kind::Clean && disk::present(&t.path)) {
+        let Ok(entries) = disk::read_entries(&t.path) else { continue };
+        let names = entries.into_iter().map(|(_, name, _)| name.to_string_lossy().to_string()).collect();
+        for n in auto_pick(t.id, names, busy) {
+            let p = t.path.join(&n);
+            if disk::deletion_safety(&p).0 == DelSafety::Safe {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scheduled_cleanup_spares_running_apps() {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let busy = |n: &str| n.eq_ignore_ascii_case("com.hnc.Discord") || n == "Firefox";
+        let picked = auto_pick("caches", names(&["com.hnc.Discord", "Firefox", "com.apple.Safari", "MacPilot", "com.old.app", "Yarn"]), &busy);
+        assert_eq!(picked, names(&["com.old.app", "Yarn"]));
+        // Logs and the like are taken whole.
+        assert_eq!(auto_pick("logs", names(&["Firefox", "DiagnosticReports"]), &busy).len(), 2);
+        // Only targets that are safe to clean without asking are on the list.
+        let all = targets();
+        for id in AUTO_IDS {
+            let t = all.iter().find(|t| t.id == *id).expect(id);
+            assert_eq!((t.kind, target_safety(t)), (Kind::Clean, DelSafety::Safe), "{id}");
+        }
+    }
+}
