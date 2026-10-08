@@ -135,6 +135,20 @@ pub fn set_status(info: Option<StatusInfo>) {
     });
 }
 
+/// Space macOS can free by itself when something needs it ("purgeable": snapshots, caches,
+/// files that are also in iCloud). The difference between what Finder calls available and what is really free.
+pub fn purgeable() -> Option<u64> {
+    use objc2_foundation::{NSNumber, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey, NSURLVolumeAvailableCapacityKey};
+    let url = NSURL::fileURLWithPath(&NSString::from_str("/"));
+    let read = |key| unsafe {
+        let mut value = None;
+        url.getResourceValue_forKey_error(&mut value, key).ok()?;
+        value.and_then(|v| v.downcast::<NSNumber>().ok()).map(|n| n.unsignedLongLongValue())
+    };
+    let (important, free) = unsafe { (read(NSURLVolumeAvailableCapacityForImportantUsageKey)?, read(NSURLVolumeAvailableCapacityKey)?) };
+    Some(important.saturating_sub(free))
+}
+
 /// Quit the app (as ⌘Q does).
 pub fn quit() {
     if let Some(mtm) = MainThreadMarker::new() {

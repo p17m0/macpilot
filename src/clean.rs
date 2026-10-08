@@ -123,6 +123,15 @@ pub fn targets() -> Vec<Target> {
             tr("Docker images and containers. Clean with `docker system prune`, not by hand."),
             Manual,
         ),
+        t(
+            "installers",
+            tr("Old installers"),
+            "Downloads",
+            tr(
+                "Disk images and installer packages (.dmg, .pkg, .xip, .iso) downloaded more than a month ago. What they install is already on the Mac.",
+            ),
+            Clean,
+        ),
         t("downloads", tr("Downloads"), "Downloads", tr("Downloaded files. Open it and remove what you do not need."), Manual),
         t("trash", tr("Trash"), ".Trash", tr("Files you already deleted. Empty the Trash to actually free the space."), Trash),
     ]
@@ -138,17 +147,58 @@ pub fn target_safety(t: &Target) -> DelSafety {
 /// Measure all targets in the background; results arrive as (index, size).
 pub fn measure_all(targets: &[Target], tx: Sender<(usize, DirStat)>) {
     let mut paths: Vec<(usize, PathBuf)> = targets.iter().enumerate().map(|(i, t)| (i, t.path.clone())).collect();
+    let ids: Vec<&'static str> = targets.iter().map(|t| t.id).collect();
     // Other apps' containers may trigger a macOS permission dialog — measure them last.
     paths.sort_by_key(|(_, p)| p.components().any(|c| c.as_os_str() == "Containers"));
     std::thread::spawn(move || {
         crate::background_qos();
         for (i, p) in paths {
-            let st = if disk::present(&p) { disk::measure(&p) } else { DirStat::default() };
+            let st = if !disk::present(&p) {
+                DirStat::default()
+            } else if ids[i] == "installers" {
+                let found = old_installers(&p, disk::now_unix());
+                DirStat { size: found.iter().map(|f| f.1).sum(), files: found.len() as u64, ..Default::default() }
+            } else {
+                disk::measure(&p)
+            };
             if tx.send((i, st)).is_err() {
                 break;
             }
         }
     });
+}
+
+/// Installers older than this many days are offered for removal.
+pub const INSTALLER_DAYS: i64 = 30;
+
+/// Disk images and installer packages lying in `dir` (not deeper) since more than a month:
+/// downloaded, used once and forgotten. Returns each with its size.
+pub fn old_installers(dir: &std::path::Path, now: i64) -> Vec<(PathBuf, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    if disk::is_excluded(dir) {
+        return Vec::new();
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out: Vec<(PathBuf, u64)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            let ext = p.extension()?.to_str()?.to_lowercase();
+            if !["dmg", "pkg", "mpkg", "xip", "iso"].contains(&ext.as_str()) {
+                return None;
+            }
+            let md = std::fs::symlink_metadata(&p).ok()?;
+            // When it arrived here: the later of creation and last change.
+            let born = md.created().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs() as i64);
+            if now - born.max(md.mtime()) < INSTALLER_DAYS * 86_400 {
+                return None;
+            }
+            let size = if md.is_dir() { disk::measure(&p).size } else { md.blocks() * 512 };
+            Some((p, size))
+        })
+        .collect();
+    out.sort_by_key(|f| std::cmp::Reverse(f.1));
+    out
 }
 
 /// What the scheduled cleanup touches: only things that are recreated by themselves and that
@@ -205,5 +255,24 @@ mod tests {
             let t = all.iter().find(|t| t.id == *id).expect(id);
             assert_eq!((t.kind, target_safety(t)), (Kind::Clean, DelSafety::Safe), "{id}");
         }
+    }
+
+    #[test]
+    fn finds_only_old_installers() {
+        let dir = std::env::temp_dir().join(format!("macpilot-installers-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for f in ["App.dmg", "Tool.PKG", "notes.txt", "archive.zip", "sub/Deep.dmg"] {
+            std::fs::write(dir.join(f), vec![1u8; 5000]).unwrap();
+        }
+        let now = disk::now_unix();
+        // Just downloaded: nothing is offered.
+        assert!(old_installers(&dir, now).is_empty());
+        // Two months later: the installers at the top level, and nothing else.
+        let mut names: Vec<String> =
+            old_installers(&dir, now + 60 * 86_400).iter().map(|f| f.0.file_name().unwrap().to_string_lossy().to_string()).collect();
+        names.sort();
+        assert_eq!(names, ["App.dmg", "Tool.PKG"]);
+        assert!(old_installers(&dir, now + 60 * 86_400).iter().all(|f| f.1 >= 4096));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

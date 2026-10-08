@@ -624,16 +624,19 @@ fn summary(g: &mut Gui, ui: &mut Ui) {
                     macpilot::open_full_disk_access_settings();
                 }
             }
-            if !info.snapshots.is_empty() {
+            if let Some(p) = info.purgeable.filter(|p| *p > 1_000_000_000) {
                 ui.add_space(w::sp::S);
-                w::note(
-                    ui,
-                    C::accent(),
-                    &trf("{0} local Time Machine snapshots", &[&info.snapshots.len()]),
-                    tr("They keep deleted files for a while. macOS removes them by itself when space runs low."),
+                ui.label(
+                    RichText::new(trf(
+                        "macOS can free about {0} more by itself when something needs the space (snapshots, caches, files that are also in iCloud).",
+                        &[&fmt::bytes(p)],
+                    ))
+                    .callout()
+                    .color(C::dim(ui)),
                 );
             }
         });
+        snapshots(g, ui, &info.snapshots);
 
         ui.add_space(w::sp::L);
         ui.horizontal(|ui| {
@@ -1190,4 +1193,65 @@ pub fn ask_trash_many(g: &mut Gui, items: Vec<(PathBuf, u64, String)>, note_fmt:
         Confirm::new(tr("Move to the Trash?"), lines, Action::Trash { paths: items.into_iter().map(|i| i.0).collect(), size }, tr("Move to Trash"));
     c.danger = careful > 0;
     g.confirm = Some(c);
+}
+
+/// Local Time Machine snapshots: they hold on to deleted files, so the disk does not get freer.
+fn snapshots(g: &mut Gui, ui: &mut Ui, list: &[String]) {
+    if list.is_empty() {
+        return;
+    }
+    ui.add_space(w::sp::L);
+    let mut delete: Option<Vec<String>> = None;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Time Machine snapshots on this disk")).section());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if list.len() > 1 && ui.button(tr("Delete all…")).clicked() {
+                delete = Some(list.to_vec());
+            }
+        });
+    });
+    ui.add_space(w::sp::S);
+    w::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(
+            RichText::new(tr(
+                "Hourly copies macOS keeps on the disk for a day. They hold on to files you deleted, so the space is not freed at once. macOS removes them by itself when space runs low; deleting them here frees it now.",
+            ))
+            .callout()
+            .color(C::dim(ui)),
+        );
+        ui.add_space(w::sp::S);
+        for (i, name) in list.iter().enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            ui.horizontal(|ui| {
+                ui.set_min_height(30.0);
+                match macpilot::space::snapshot_time(name) {
+                    Some(t) => {
+                        fixed(ui, 230.0, RichText::new(fmt::ago(t)).semibold());
+                        ui.label(RichText::new(name).callout().color(C::dim(ui)));
+                    }
+                    None => {
+                        ui.label(RichText::new(name).semibold());
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(tr("Delete…")).clicked() {
+                        delete = Some(vec![name.clone()]);
+                    }
+                });
+            });
+        }
+    });
+    if let Some(dates) = delete {
+        let lines = vec![
+            (trf("Snapshots: {0}", &[&dates.len()]), Level::Info),
+            (tr("Your files stay as they are. What goes away is the possibility to return to the state of that hour.").into(), Level::Warn),
+            (tr("This cannot be undone. macOS may ask for the administrator password.").into(), Level::Danger),
+        ];
+        let mut c = Confirm::new(tr("Delete the snapshots?"), lines, Action::DeleteSnapshots(dates), tr("Delete"));
+        c.danger = true;
+        g.confirm = Some(c);
+    }
 }

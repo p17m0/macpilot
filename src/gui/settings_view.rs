@@ -273,6 +273,23 @@ fn auto_clean(g: &mut Gui, ui: &mut Ui) {
     row(ui, tr("Clean up on a schedule"), &hint, |ui| {
         w::segmented(ui, &mut days, &[(0, tr("Never")), (7, tr("Weekly")), (30, tr("Monthly"))]);
     });
+    // What it would take right now, so the schedule is not switched on blindly.
+    if g.settings.file_access {
+        g.preview_auto_clean();
+        let status = match g.auto_preview {
+            Some((0, _)) => tr("Nothing to clean up right now.").to_string(),
+            Some((n, size)) => format!("{}, {}", macpilot::fmt::bytes(size), macpilot::fmt::n(n as u64, macpilot::fmt::Noun::Item)),
+            None => tr("measuring…").to_string(),
+        };
+        let mut run = false;
+        row(ui, tr("It would take now"), &status, |ui| {
+            let has = g.auto_preview.is_some_and(|p| p.0 > 0);
+            run = ui.add_enabled(has, egui::Button::new(tr("Run now…"))).clicked();
+        });
+        if run {
+            g.ask_auto_clean_now();
+        }
+    }
     if days != g.settings.auto_clean_days {
         // The first run is a whole period away, not right now.
         if g.settings.auto_clean_days == 0 {

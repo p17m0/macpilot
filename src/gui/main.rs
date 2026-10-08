@@ -50,6 +50,8 @@ pub enum Page {
 pub struct SpaceInfo {
     pub volumes: Option<macpilot::space::Volumes>,
     pub snapshots: Vec<String>,
+    /// Space macOS frees by itself when needed.
+    pub purgeable: Option<u64>,
     /// Folders outside the home folder: (path, kind, size once measured).
     pub outside: Vec<(PathBuf, &'static str, Option<u64>)>,
     pub measuring: bool,
@@ -108,6 +110,7 @@ pub enum CleanMode {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AppsMode {
     Installed,
+    Updates,
     Leftovers,
 }
 
@@ -118,11 +121,26 @@ pub enum Sel {
 }
 
 pub enum Action {
-    Signal { pids: Vec<u32>, sig: i32, admin: bool },
-    QuitApp { app: PathBuf, main_pid: Option<u32> },
-    Trash { paths: Vec<PathBuf>, size: u64 },
+    Signal {
+        pids: Vec<u32>,
+        sig: i32,
+        admin: bool,
+    },
+    QuitApp {
+        app: PathBuf,
+        main_pid: Option<u32>,
+    },
+    Trash {
+        paths: Vec<PathBuf>,
+        size: u64,
+    },
     EmptyTrash,
-    Startup { item: StartupItem, on: bool },
+    Startup {
+        item: StartupItem,
+        on: bool,
+    },
+    /// Local Time Machine snapshots, by date.
+    DeleteSnapshots(Vec<String>),
 }
 
 pub struct Confirm {
@@ -173,6 +191,14 @@ pub enum Msg {
         size: u64,
         result: Result<(), String>,
     },
+    /// What the scheduled cleanup would take right now: (items, bytes).
+    AutoPreview(usize, u64),
+    SnapshotsDeleted(Result<usize, String>),
+    AppUpdates(macpilot::appupdates::Report),
+    AppUpdated {
+        update: macpilot::appupdates::Update,
+        result: Result<(), String>,
+    },
 }
 
 pub struct Gui {
@@ -211,6 +237,15 @@ pub struct Gui {
     /// The new version is being downloaded.
     pub update_installing: bool,
     auto_clean_running: bool,
+    /// What the scheduled cleanup would take now, and when that was measured.
+    pub auto_preview: Option<(usize, u64)>,
+    auto_preview_at: Option<Instant>,
+    pub auto_preview_running: bool,
+    /// Newer versions of installed apps (after "Check for updates" on the Apps page).
+    pub app_updates: Option<macpilot::appupdates::Report>,
+    pub app_updates_checking: bool,
+    /// Apps whose update is running now.
+    pub app_updating: HashSet<PathBuf>,
 
     // Battery
     pub power: Arc<Mutex<PowerInfo>>,
@@ -353,10 +388,12 @@ impl Gui {
                 loop {
                     let v = macpilot::space::volumes();
                     let snaps = macpilot::space::local_snapshots();
+                    let purgeable = mac::purgeable();
                     {
                         let mut s = space.lock().unwrap();
                         s.volumes = v;
                         s.snapshots = snaps;
+                        s.purgeable = purgeable;
                     }
                     ctx.request_repaint();
                     std::thread::sleep(Duration::from_secs(600));
@@ -480,6 +517,12 @@ impl Gui {
             trash_log: macpilot::trashlog::load(),
             update_installing: false,
             auto_clean_running: false,
+            auto_preview: None,
+            auto_preview_at: None,
+            auto_preview_running: false,
+            app_updates: None,
+            app_updates_checking: false,
+            app_updating: HashSet::new(),
             power,
             battery_hist: macpilot::battery::load_history(),
             battery_days: 1,
@@ -566,7 +609,8 @@ impl Gui {
             _ => {}
         }
         let Ok(page) = std::env::var("MACPILOT_PAGE") else { return };
-        let (page, sub) = page.split_once(':').unwrap_or((page.as_str(), ""));
+        let page = page.trim_end_matches(":check");
+        let (page, sub) = page.split_once(':').unwrap_or((page, ""));
         let p = match page {
             "procs" => Page::Procs,
             "battery" => Page::Battery,
@@ -595,6 +639,7 @@ impl Gui {
             "history" => self.clean_mode = CleanMode::History,
             "cleanup" => self.settings_tab = settings_view::SettingsTab::Disk,
             "leftovers" => self.apps_mode = AppsMode::Leftovers,
+            "updates" => self.apps_mode = AppsMode::Updates,
             "flat" => self.view = ProcView::Flat,
             _ => {}
         }
@@ -843,6 +888,38 @@ impl Gui {
                 self.journal(&paths, size);
                 self.after_trash(&paths);
             }
+            Msg::AutoPreview(n, size) => {
+                self.auto_preview_running = false;
+                self.auto_preview = Some((n, size));
+            }
+            Msg::SnapshotsDeleted(r) => {
+                match r {
+                    Ok(n) => self.toast(trf("Snapshots deleted: {0}", &[&n]), Level::Ok),
+                    // Empty: the password dialog was cancelled.
+                    Err(e) if e.is_empty() => {}
+                    Err(e) => self.toast(trf("Could not delete the snapshots: {0}", &[&e]), Level::Danger),
+                }
+                self.refresh_space();
+            }
+            Msg::AppUpdates(r) => {
+                self.app_updates_checking = false;
+                self.app_updates = Some(r);
+            }
+            Msg::AppUpdated { update, result } => {
+                self.app_updating.remove(&update.app);
+                use macpilot::appupdates::Source;
+                match (result, &update.source) {
+                    (Ok(()), Source::Homebrew { .. }) => {
+                        self.toast(trf("{0} is updated to {1}.", &[&update.name, &update.latest]), Level::Ok);
+                        if let Some(r) = &mut self.app_updates {
+                            r.updates.retain(|u| u.app != update.app);
+                        }
+                    }
+                    (Ok(()), Source::AppStore { .. }) => self.toast(trf("The App Store is open: update {0} there.", &[&update.name]), Level::Info),
+                    (Ok(()), Source::Sparkle) => self.toast(trf("{0} is open: it will offer the update itself.", &[&update.name]), Level::Info),
+                    (Err(e), _) => self.toast(trf("Could not update {0}: {1}", &[&update.name, &e]), Level::Danger),
+                }
+            }
             Msg::UpdateReady(r) => {
                 self.update_installing = false;
                 match r.and_then(|app| macpilot::update::install_on_quit(&app)) {
@@ -917,6 +994,96 @@ impl Gui {
         });
     }
 
+    /// What the scheduled cleanup takes. `None` until the app list is there: which caches belong
+    /// to running apps is not known before.
+    fn auto_clean_paths(&self) -> Option<Vec<PathBuf>> {
+        let apps = self.apps.as_ref()?;
+        let running: Vec<(String, String)> = apps
+            .iter()
+            .filter(|a| macpilot::apps::is_running(&a.path, &self.snap))
+            .map(|a| (a.bundle_id.to_lowercase(), a.name.to_lowercase()))
+            .collect();
+        let busy = |name: &str| {
+            let n = name.to_lowercase();
+            running.iter().any(|(id, app)| (!id.is_empty() && (n == *id || n.starts_with(&format!("{id}.")))) || n == *app)
+        };
+        Some(macpilot::clean::auto_paths(&self.targets, &busy))
+    }
+
+    /// Measure what the scheduled cleanup would take now (for Settings); at most once a minute.
+    pub fn preview_auto_clean(&mut self) {
+        if self.auto_preview_running || !self.settings.file_access || self.auto_preview_at.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+            return;
+        }
+        let Some(paths) = self.auto_clean_paths() else { return };
+        self.auto_preview_running = true;
+        self.auto_preview_at = Some(Instant::now());
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            macpilot::background_qos();
+            let size = paths.iter().map(|p| disk::measure(p).size).sum();
+            let _ = tx.send(Msg::AutoPreview(paths.len(), size));
+            ctx.request_repaint();
+        });
+    }
+
+    /// "Run now" in Settings: the same selection as the schedule, but asked about first.
+    pub fn ask_auto_clean_now(&mut self) {
+        let Some(paths) = self.auto_clean_paths().filter(|p| !p.is_empty()) else {
+            self.toast(tr("Nothing to clean up right now."), Level::Info);
+            return;
+        };
+        let size = self.auto_preview.map(|p| p.1).unwrap_or(0);
+        let lines = vec![
+            (format!("{}, {}", fmt::n(paths.len() as u64, fmt::Noun::Item), fmt::bytes(size)), Level::Info),
+            (tr("Caches of apps that are not running, logs and previews. Apple's caches and running apps are left alone.").into(), Level::Info),
+            (tr("Everything goes to the Trash and is listed in Cleanup → History.").into(), Level::Ok),
+        ];
+        self.auto_preview_at = None;
+        self.confirm = Some(Confirm::new(tr("Clean up now?"), lines, Action::Trash { paths, size }, tr("Clean")));
+    }
+
+    /// Ask the App Store, Homebrew and the apps' own update feeds for newer versions.
+    pub fn check_app_updates(&mut self) {
+        if self.app_updates_checking {
+            return;
+        }
+        let Some(apps) = self.apps.clone() else { return };
+        self.app_updates_checking = true;
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::AppUpdates(macpilot::appupdates::check(&apps)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Update one app the way its source does it.
+    pub fn update_app(&mut self, update: macpilot::appupdates::Update) {
+        if !self.app_updating.insert(update.app.clone()) {
+            return;
+        }
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let result = macpilot::appupdates::start(&update);
+            let _ = tx.send(Msg::AppUpdated { update, result });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Read the volumes and snapshots again (after snapshots were deleted).
+    fn refresh_space(&self) {
+        let (space, ctx) = (self.space.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let (v, snaps, purgeable) = (macpilot::space::volumes(), macpilot::space::local_snapshots(), mac::purgeable());
+            let mut s = space.lock().unwrap();
+            s.volumes = v;
+            s.snapshots = snaps;
+            s.purgeable = purgeable;
+            drop(s);
+            ctx.request_repaint();
+        });
+    }
+
     /// Scheduled cleanup: caches (not of running apps) and logs go to the Trash every N days.
     fn auto_clean(&mut self) {
         let days = self.settings.auto_clean_days;
@@ -929,18 +1096,7 @@ impl Gui {
         {
             return;
         }
-        // Which caches belong to running apps is known only once the app list is there.
-        let Some(apps) = &self.apps else { return };
-        let running: Vec<(String, String)> = apps
-            .iter()
-            .filter(|a| macpilot::apps::is_running(&a.path, &self.snap))
-            .map(|a| (a.bundle_id.to_lowercase(), a.name.to_lowercase()))
-            .collect();
-        let busy = |name: &str| {
-            let n = name.to_lowercase();
-            running.iter().any(|(id, app)| (!id.is_empty() && (n == *id || n.starts_with(&format!("{id}.")))) || n == *app)
-        };
-        let paths = macpilot::clean::auto_paths(&self.targets, &busy);
+        let Some(paths) = self.auto_clean_paths() else { return };
         self.settings.auto_clean_last = now;
         self.save_settings();
         if paths.is_empty() {
@@ -1145,6 +1301,12 @@ impl Gui {
                 std::thread::spawn(move || {
                     let result = macpilot::trash::move_to_trash(&paths);
                     let _ = tx.send(Msg::Trashed { paths, size, result });
+                    ctx.request_repaint();
+                });
+            }
+            Action::DeleteSnapshots(dates) => {
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::SnapshotsDeleted(macpilot::space::delete_snapshots(&dates)));
                     ctx.request_repaint();
                 });
             }
@@ -1571,6 +1733,7 @@ impl Gui {
             || self.rescan.is_some()
             || self.dupes.as_ref().is_some_and(|d| !d.done())
             || self.apps.is_none()
+            || self.app_updates_checking
             || self.orphans.is_none()
             || self.startup.is_none()
             || self.targets.iter().any(|t| t.stat.is_none() && disk::present(&t.path));
@@ -1867,6 +2030,13 @@ impl Gui {
     }
 }
 
+/// Developer option for automated UI checks: MACPILOT_SIZE=1060x640.
+fn dev_size() -> Option<[f32; 2]> {
+    let v = std::env::var("MACPILOT_SIZE").ok()?;
+    let (w, h) = v.split_once('x')?;
+    Some([w.parse().ok()?, h.parse().ok()?])
+}
+
 fn main() -> eframe::Result {
     // `MacPilot --autostart on|off|status` toggles or shows launch at login without opening a window.
     let args: Vec<String> = std::env::args().collect();
@@ -1894,8 +2064,8 @@ fn main() -> eframe::Result {
     let vp = egui::ViewportBuilder::default()
         .with_icon(Arc::new(egui::IconData::default()))
         .with_title("MacPilot")
-        .with_inner_size([1320.0, 840.0])
-        .with_min_inner_size([1060.0, 640.0]);
+        .with_inner_size(dev_size().unwrap_or([1320.0, 840.0]))
+        .with_min_inner_size([1200.0, 640.0]);
     let opts = eframe::NativeOptions { viewport: vp, ..Default::default() };
     eframe::run_native("MacPilot", opts, Box::new(|cc| Ok(Box::new(Gui::new(cc)))))
 }

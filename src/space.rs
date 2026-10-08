@@ -91,6 +91,52 @@ pub fn local_snapshots() -> Vec<String> {
         .collect()
 }
 
+/// Delete local Time Machine snapshots by their dates ("2026-10-08-101500"). macOS may want an
+/// administrator for it: then its own password dialog is shown, once for all of them.
+/// Returns how many were deleted.
+pub fn delete_snapshots(dates: &[String]) -> Result<usize, String> {
+    let dates: Vec<&String> = dates.iter().filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit() || c == '-')).collect();
+    let before = local_snapshots();
+    let mut left = Vec::new();
+    for d in &dates {
+        let ok = std::process::Command::new("/usr/bin/tmutil").args(["deletelocalsnapshots", d]).output().is_ok_and(|o| o.status.success());
+        if !ok {
+            left.push(d.as_str());
+        }
+    }
+    if !left.is_empty() {
+        let cmd: Vec<String> = left.iter().map(|d| format!("/usr/bin/tmutil deletelocalsnapshots {d}")).collect();
+        let script = format!("do shell script \"{}\" with administrator privileges", cmd.join("; "));
+        let out = std::process::Command::new("osascript").arg("-e").arg(script).output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            // -128: the password dialog was cancelled.
+            return Err(if err.contains("-128") { String::new() } else { err });
+        }
+    }
+    let after = local_snapshots();
+    Ok(before.iter().filter(|d| !after.contains(d)).count())
+}
+
+/// "2026-10-08-101500" → unix seconds (the name is in local time).
+pub fn snapshot_time(date: &str) -> Option<i64> {
+    let p: Vec<&str> = date.split('-').collect();
+    let [y, m, d, hms] = p[..] else { return None };
+    if hms.len() != 6 {
+        return None;
+    }
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    tm.tm_year = y.parse::<i32>().ok()? - 1900;
+    tm.tm_mon = m.parse::<i32>().ok()? - 1;
+    tm.tm_mday = d.parse().ok()?;
+    tm.tm_hour = hms[0..2].parse().ok()?;
+    tm.tm_min = hms[2..4].parse().ok()?;
+    tm.tm_sec = hms[4..6].parse().ok()?;
+    tm.tm_isdst = -1;
+    let t = unsafe { libc::mktime(&mut tm) };
+    (t > 0).then_some(t as i64)
+}
+
 /// Big folders outside the home folder, with a short explanation key.
 pub fn outside_home() -> Vec<(PathBuf, &'static str)> {
     let mut v = vec![

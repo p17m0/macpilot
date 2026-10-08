@@ -27,17 +27,126 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     w::segmented(
                         ui,
                         &mut g.apps_mode,
-                        &[(AppsMode::Installed, tr("Installed")), (AppsMode::Leftovers, tr("Leftovers of removed apps"))],
+                        &[
+                            (AppsMode::Installed, tr("Installed")),
+                            (AppsMode::Updates, tr("Updates")),
+                            (AppsMode::Leftovers, tr("Leftovers of removed apps")),
+                        ],
                     );
                 },
                 |_| {},
             );
             match g.apps_mode {
                 AppsMode::Installed => installed(g, ui),
+                AppsMode::Updates => updates(g, ui),
                 AppsMode::Leftovers => leftovers(g, ui),
             }
         });
     });
+}
+
+/// Newer versions of installed apps. Nothing is asked over the network until the button is pressed.
+fn updates(g: &mut Gui, ui: &mut Ui) {
+    use macpilot::appupdates::Source;
+    if g.apps.is_none() {
+        w::waiting(ui, tr("Measuring apps…"));
+        return;
+    }
+    // For automated UI checks: MACPILOT_PAGE=apps:updates:check
+    #[cfg(feature = "dev-tools")]
+    if g.app_updates.is_none() && std::env::var("MACPILOT_PAGE").is_ok_and(|p| p.ends_with(":check")) {
+        g.check_app_updates();
+    }
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_max_width(ui.available_width() - 220.0);
+            let status = match (&g.app_updates, g.app_updates_checking) {
+                (_, true) => tr("Checking…").to_string(),
+                (Some(r), _) if r.updates.is_empty() => trf("No updates found. Checked {0} of {1} apps.", &[&r.checked, &r.total]),
+                (Some(r), _) => trf("Updates: {0}. Checked {1} of {2} apps.", &[&r.updates.len(), &r.checked, &r.total]),
+                (None, _) => tr("Not checked yet.").to_string(),
+            };
+            ui.label(RichText::new(status).semibold());
+            ui.label(
+                RichText::new(tr(
+                    "MacPilot asks the App Store about apps installed from it, Homebrew about its casks, and the update feeds of apps that have one. Only app identifiers are sent. Other apps cannot be checked — they update themselves.",
+                ))
+                .callout()
+                .color(C::dim(ui)),
+            );
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if g.app_updates_checking {
+                ui.spinner();
+            } else if w::big_button(ui, tr("Check now"), C::accent(), true).clicked() {
+                g.check_app_updates();
+            }
+        });
+    });
+    ui.add_space(w::sp::M);
+    let Some(report) = g.app_updates.clone() else { return };
+    if report.updates.is_empty() {
+        if !g.app_updates_checking {
+            w::empty(ui, tr("Everything that could be checked is up to date."));
+        }
+        return;
+    }
+    let mut go = None;
+    TableBuilder::new(ui)
+        .striped(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .column(Column::remainder().at_least(220.0).clip(true))
+        .column(Column::exact(110.0).clip(true))
+        .column(Column::exact(110.0).clip(true))
+        .column(Column::exact(110.0))
+        .column(Column::exact(170.0))
+        .header(24.0, |mut h| {
+            for t in [tr("App"), tr("You have"), tr("Available"), tr("Source"), ""] {
+                h.col(|ui| {
+                    ui.label(RichText::new(t).semibold().color(C::dim(ui)));
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(40.0, report.updates.len(), |mut row| {
+                let u = &report.updates[row.index()];
+                row.col(|ui| {
+                    icons::app(ui, &u.app, 24.0);
+                    ui.label(RichText::new(&u.name).semibold());
+                });
+                row.col(|ui| {
+                    ui.label(RichText::new(&u.installed).color(C::dim(ui)));
+                });
+                row.col(|ui| {
+                    ui.label(RichText::new(&u.latest).color(C::green()));
+                });
+                row.col(|ui| {
+                    let source = match u.source {
+                        Source::AppStore { .. } => "App Store",
+                        Source::Homebrew { .. } => "Homebrew",
+                        Source::Sparkle => tr("the app itself"),
+                    };
+                    ui.label(RichText::new(source).color(C::dim(ui)));
+                });
+                row.col(|ui| {
+                    if g.app_updating.contains(&u.app) {
+                        ui.spinner();
+                        return;
+                    }
+                    let (label, hover) = match u.source {
+                        Source::AppStore { .. } => (tr("Open in App Store"), tr("The App Store installs the update")),
+                        Source::Homebrew { .. } => (tr("Update"), tr("Runs `brew upgrade --cask` in the background")),
+                        Source::Sparkle => (tr("Open the app"), tr("The app offers the update when it starts")),
+                    };
+                    if ui.button(label).on_hover_text(hover).clicked() {
+                        go = Some(u.clone());
+                    }
+                });
+            });
+        });
+    if let Some(u) = go {
+        g.update_app(u);
+    }
 }
 
 fn installed(g: &mut Gui, ui: &mut Ui) {

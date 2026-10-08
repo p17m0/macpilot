@@ -58,6 +58,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Disk.**
 - **Summary**: the whole disk in one bar (your files, apps and other folders, macOS, swap, free, and what is hidden without Full Disk Access), plus what grew or shrank over the last day, week or month.
+- **Time Machine snapshots**: the local snapshots that hold on to deleted files, with a button to delete them, and how much macOS can free by itself.
 - **List**: sizes, share of the folder, *Modified* and *Opened* dates.
 - **Map**: a treemap, like DaisyDisk.
 - **Large files**: everything from 50 MB.
@@ -68,9 +69,12 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 - **System junk**: app caches, logs, Xcode data, iOS updates, Mail downloads, package-manager caches (npm, pnpm, Yarn, Cargo, Gradle, Homebrew…). You can also empty the Trash from here.
 - **History**: everything MacPilot moved to the Trash in the last 90 days, with *Put Back* while it is still there.
 - **On a schedule** (off by default, Settings → Disk and Cleanup): weekly or monthly, caches of apps that are not running, logs and previews go to the Trash on their own.
+- **Old installers**: disk images and packages (.dmg, .pkg…) forgotten in Downloads for more than a month.
 - **Developer junk**: `node_modules`, `target`, `build`, `.venv`, `Pods`, DerivedData and more, in every project. It shows when each *project itself* was last changed, so builds of old projects are easy to spot.
 
 **Apps.** Uninstall apps together with the files they leave in `~/Library`, like AppCleaner. It also finds what apps you already removed left behind — in Application Support, Caches, Containers, Preferences, Logs, WebKit, cookies and more, by bundle id and by the app's name — grouped per app. Apple's data, installed apps' helpers and shared updaters are never listed; containers that may hold your documents are marked.
+
+**App updates.** *Apps → Updates* checks the App Store, Homebrew casks and the apps' own update feeds on request, and lists what has a newer version.
 
 **Startup.** All launch agents and daemons: what each one runs, who made it, and whether it is running. Turn items off reversibly (`launchctl disable`). Known adware and broken leftovers are flagged.
 

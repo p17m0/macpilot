@@ -383,12 +383,53 @@ pub fn title_bar(ui: &mut Ui, title: &str, subtitle: &str, sections: impl FnOnce
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
         });
     } else {
+        // In a narrow window the three parts do not fit one row: the actions, and then the
+        // sections too, move to rows of their own. Their widths are known from the last frame.
+        let id = ui.id().with(("title_bar", title));
+        let (title_w, sections_w, actions_w): (f32, f32, f32) = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+        let avail = ui.available_width();
+        let gap = sp::M * 2.0;
+        let sections_below = title_w + sections_w + gap > avail;
+        // A page without actions has nothing to move.
+        let actions_below = actions_w > 0.0 && (sections_below || title_w + sections_w + actions_w + gap * 2.0 > avail);
+        let mut sections = Some(sections);
+        let mut actions = Some(actions);
+        let mut widths = (title_w, sections_w, actions_w);
+        let measure = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| ui.scope(|ui| add(ui)).response.rect.width();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(title).large_title());
+            widths.0 = ui.label(RichText::new(title).large_title()).rect.width();
             ui.add_space(sp::M);
-            sections(ui);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
+            if !sections_below {
+                let f = sections.take().unwrap();
+                let mut f = Some(f);
+                widths.1 = measure(ui, &mut |ui| (f.take().unwrap())(ui));
+            }
+            if !actions_below {
+                let f = actions.take().unwrap();
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut f = Some(f);
+                    widths.2 = measure(ui, &mut |ui| (f.take().unwrap())(ui));
+                });
+            }
         });
+        if let Some(f) = sections.take() {
+            ui.add_space(sp::S);
+            // Wider than the page itself (the smallest window): the row scrolls sideways.
+            let out = egui::ScrollArea::horizontal()
+                .id_salt(id.with("sections"))
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| ui.horizontal(|ui| f(ui)));
+            widths.1 = out.content_size.x;
+        }
+        if let Some(f) = actions.take() {
+            ui.add_space(sp::S);
+            let mut f = Some(f);
+            ui.horizontal(|ui| widths.2 = measure(ui, &mut |ui| (f.take().unwrap())(ui)));
+        }
+        if widths != (title_w, sections_w, actions_w) {
+            ui.data_mut(|d| d.insert_temp(id, widths));
+            ui.ctx().request_repaint();
+        }
     }
     if !subtitle.is_empty() {
         ui.label(RichText::new(subtitle).color(C::dim(ui)));

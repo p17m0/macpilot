@@ -266,6 +266,8 @@ fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
 fn ask_clean(g: &mut Gui, i: usize) {
     let t = g.targets[i].clone();
     let children: Vec<PathBuf> = match std::fs::read_dir(&t.path) {
+        // Not the whole Downloads folder: only the installers that have been lying there for a month.
+        Ok(_) if t.id == "installers" => clean::old_installers(&t.path, disk::now_unix()).into_iter().map(|f| f.0).collect(),
         Ok(rd) => rd.flatten().map(|e| e.path()).filter(|c| disk::deletion_safety(c).0 != DelSafety::Blocked).collect(),
         Err(e) => {
             g.toast(format!("{}: {}", fmt::path(&t.path), disk::perm_hint(&e)), Level::Danger);
@@ -282,6 +284,13 @@ fn ask_clean(g: &mut Gui, i: usize) {
         (t.hint.to_string(), Level::Info),
         (tr("The contents go to the Trash (the folder itself stays).").into(), Level::Ok),
     ];
+    if t.id == "installers" {
+        lines[2].0 = tr("Only these installers go to the Trash; everything else in Downloads stays.").into();
+        lines.extend(children.iter().take(8).map(|c| (c.file_name().unwrap_or_default().to_string_lossy().to_string(), Level::Info)));
+        if children.len() > 8 {
+            lines.push((trf("…and {0} more", &[&(children.len() - 8)]), Level::Info));
+        }
+    }
     if t.id == "caches" {
         let running: Vec<String> = g
             .snap

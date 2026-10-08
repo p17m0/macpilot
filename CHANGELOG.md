@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2
+
+- **Apps → Updates**: *Check now* asks the App Store about apps installed from it, Homebrew about its casks and the update feeds of apps that have one (Sparkle), and lists the apps with a newer version. App Store apps open their store page, casks are upgraded with `brew upgrade --cask`, the others are opened so they update themselves. Nothing is asked until you press the button.
+- **Cleanup → Old installers**: disk images and installer packages (.dmg, .pkg, .xip, .iso) lying in Downloads for more than a month. Only they go to the Trash; the rest of Downloads stays.
+- **Disk → Summary → Time Machine snapshots**: the local snapshots with their age, *Delete…* for one or all (macOS may ask for the administrator password), and how much macOS can free by itself ("purgeable").
+- **Cleanup on a schedule shows what it would take**: Settings → Disk and Cleanup shows the size and number of items right now, and *Run now…* does the same cleanup at once, after a confirmation.
+- Fixed: in a narrow window the scan buttons of the Disk page covered its tabs. The page header now puts the buttons, and then the tabs, on rows of their own; the smallest window is a little wider (1200 pt) so the tables fit next to the side panel.
+
 ## 0.7.1
 
 - **The version is always in sight**: under the logo in the sidebar and at the bottom of Settings, with its status — *latest version* (only after GitHub confirmed it), *checking…*, *X is available* or *could not check*. A click checks again or opens the update. The first check now runs a few seconds after launch.
