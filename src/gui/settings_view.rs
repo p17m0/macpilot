@@ -79,7 +79,12 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     SettingsTab::Disk => disk(g, ui),
                 }
                 ui.add_space(w::sp::M);
-                ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
+                if macpilot::update::repo().is_some() {
+                    g.version_line(ui, "MacPilot ");
+                    ui.label(RichText::new("MIT License").callout().color(C::dim(ui)));
+                } else {
+                    ui.label(RichText::new(format!("MacPilot {} · MIT License", env!("CARGO_PKG_VERSION"))).color(C::dim(ui)));
+                }
             });
         });
     });

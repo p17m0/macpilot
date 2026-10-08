@@ -838,4 +838,13 @@ pub static TABLE: &[(&str, &str, &str, &str, &str)] = &[
     ("hottest core", "самое горячее ядро", "cœur le plus chaud", "núcleo más caliente", "heißester Kern"),
     ("processor temperature and fans", "температура процессора и вентиляторы", "température du processeur et ventilateurs", "temperatura del procesador y ventiladores", "Prozessortemperatur und Lüfter"),
     ("which apps use the network right now", "какие приложения используют сеть прямо сейчас", "quelles apps utilisent le réseau en ce moment", "qué apps usan la red ahora mismo", "welche Apps gerade das Netzwerk nutzen"),
+    ("checking…", "проверка…", "vérification…", "comprobando…", "wird geprüft…"),
+    ("Asking GitHub for the latest release", "Запрос последнего релиза на GitHub", "Demande de la dernière version à GitHub", "Consultando la última versión en GitHub", "Neuester Release wird bei GitHub abgefragt"),
+    ("{0} is available", "доступна {0}", "{0} disponible", "{0} disponible", "{0} verfügbar"),
+    ("Open the update", "Открыть обновление", "Ouvrir la mise à jour", "Abrir la actualización", "Update öffnen"),
+    ("latest version", "последняя версия", "dernière version", "última versión", "neueste Version"),
+    ("Checked against the releases on GitHub. Click to check again.", "Сверено с релизами на GitHub. Нажми, чтобы проверить ещё раз.", "Vérifié avec les versions sur GitHub. Cliquez pour revérifier.", "Comprobado con las versiones de GitHub. Haz clic para volver a comprobar.", "Mit den Releases auf GitHub abgeglichen. Klicke, um erneut zu prüfen."),
+    ("could not check", "не удалось проверить", "vérification impossible", "no se pudo comprobar", "Prüfung fehlgeschlagen"),
+    ("Click to check for updates", "Нажми, чтобы проверить обновления", "Cliquez pour chercher des mises à jour", "Haz clic para buscar actualizaciones", "Klicke, um nach Updates zu suchen"),
+    ("not checked", "не проверено", "non vérifié", "sin comprobar", "nicht geprüft"),
 ];

@@ -7,9 +7,13 @@
 
 use std::path::{Path, PathBuf};
 
-/// "owner/name" of the GitHub repository this build comes from.
+/// "owner/name" of the GitHub repository the releases are published in.
 pub fn repo() -> Option<&'static str> {
-    option_env!("MACPILOT_REPO").or(option_env!("GITHUB_REPOSITORY")).filter(|r| r.contains('/'))
+    // Set by the release build; local builds fall back to `repository` in Cargo.toml.
+    option_env!("MACPILOT_REPO")
+        .or(option_env!("GITHUB_REPOSITORY"))
+        .or(env!("CARGO_PKG_REPOSITORY").strip_prefix("https://github.com/"))
+        .filter(|r| r.contains('/'))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

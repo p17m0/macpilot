@@ -281,6 +281,8 @@ pub struct Gui {
     pub update_error: Option<String>,
     pub update_checking: bool,
     update_checked: Option<Instant>,
+    /// GitHub answered in this session: only then "latest" is a checked fact.
+    pub update_verified: bool,
     started: Instant,
     /// Scan progress watchdog: macOS blocks file access while a permission dialog is open.
     scan_files_seen: u64,
@@ -525,6 +527,7 @@ impl Gui {
             update_error: None,
             update_checking: false,
             update_checked: None,
+            update_verified: false,
             started: Instant::now(),
             full_disk_access: macpilot::has_full_disk_access(),
             scan_files_seen: 0,
@@ -731,7 +734,7 @@ impl Gui {
         self.update_menu_bar();
         // Once a day (the app may run for weeks in the menu bar); the first check a little after launch.
         let due = match self.update_checked {
-            None => self.started.elapsed() > Duration::from_secs(20),
+            None => self.started.elapsed() > Duration::from_secs(3),
             Some(t) => t.elapsed() > Duration::from_secs(24 * 3600),
         };
         if due && self.settings.check_updates && macpilot::update::repo().is_some() {
@@ -748,6 +751,7 @@ impl Gui {
                     Ok(u) => {
                         self.update = u;
                         self.update_error = None;
+                        self.update_verified = true;
                     }
                     Err(e) => self.update_error = Some(e),
                 }
@@ -1211,6 +1215,39 @@ impl Gui {
             self.disk_sel = Some(path);
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// "latest version" / "0.8.0 is available" / … next to the version number, its color and the hover.
+    pub fn version_status(&self, ui: &egui::Ui) -> (String, egui::Color32, &'static str) {
+        if self.update_checking {
+            (tr("checking…").to_string(), C::dim(ui), tr("Asking GitHub for the latest release"))
+        } else if let Some(u) = &self.update {
+            (trf("{0} is available", &[&u.version]), C::accent(), tr("Open the update"))
+        } else if self.update_verified {
+            (tr("latest version").to_string(), C::green(), tr("Checked against the releases on GitHub. Click to check again."))
+        } else if self.update_error.is_some() {
+            (tr("could not check").to_string(), C::yellow(), tr("Click to check for updates"))
+        } else {
+            (tr("not checked").to_string(), C::dim(ui), tr("Click to check for updates"))
+        }
+    }
+
+    /// The version with its status; a click checks again or opens the update.
+    pub fn version_line(&mut self, ui: &mut egui::Ui, prefix: &str) {
+        let (status, color, hover) = self.version_status(ui);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(RichText::new(format!("{prefix}{} ·", env!("CARGO_PKG_VERSION"))).callout().color(C::dim(ui)));
+            let r = ui.add(egui::Label::new(RichText::new(status).callout().color(color)).sense(egui::Sense::click()));
+            if r.on_hover_text(hover).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if self.update.is_some() {
+                    self.settings_tab = settings_view::SettingsTab::General;
+                    self.go_page(Page::Settings);
+                } else {
+                    self.check_updates();
+                }
+            }
+        });
     }
 
     pub fn check_updates(&mut self) {
@@ -1697,7 +1734,10 @@ impl Gui {
             widgets::app_logo(ui, 26.0);
             ui.label(RichText::new("MacPilot").section());
         });
-        ui.add_space(w::sp::L);
+        if macpilot::update::repo().is_some() {
+            self.version_line(ui, "");
+        }
+        ui.add_space(w::sp::M);
         for (p, icon, label) in self.nav_items() {
             let badge = match p {
                 Page::Startup => self.startup.as_ref().map(|s| s.iter().filter(|i| i.unwanted && !i.disabled).count()).filter(|n| *n > 0),

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- **The version is always in sight**: under the logo in the sidebar and at the bottom of Settings, with its status — *latest version* (only after GitHub confirmed it), *checking…*, *X is available* or *could not check*. A click checks again or opens the update. The first check now runs a few seconds after launch.
+
 ## 0.7.0
 
 - **Network per app**: a *Network* column on the Processes page (sortable; hover for download, upload and totals), the overall traffic in the menu bar menu, and `macpilot net` in the terminal.
