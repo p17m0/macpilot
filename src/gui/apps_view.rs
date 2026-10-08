@@ -12,15 +12,20 @@ use crate::widgets::{self as w, C, Level, Txt};
 use crate::{Action, AppsMode, Confirm, Gui};
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
+    let mut panel = None;
     if g.apps_mode == AppsMode::Installed {
-        egui::Panel::right("app_detail").resizable(true).default_size(380.0).min_size(320.0).frame(w::side_frame(ui)).show(ui, |ui| {
+        let r = egui::Panel::right("app_detail").resizable(true).default_size(380.0).min_size(320.0).frame(w::side_frame(ui)).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| detail(g, ui));
         });
+        panel = Some(r.response.rect.width());
     }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
+        // Only Installed has the side panel: keep the sections where they are with it.
+        let width = w::width_with_panel(ui, "app_detail", panel, 380.0, ui.available_width());
         w::centered(ui, |ui| {
-            w::title_bar(
+            w::title_bar_for(
                 ui,
+                width,
                 tr("Apps"),
                 "",
                 |ui| {

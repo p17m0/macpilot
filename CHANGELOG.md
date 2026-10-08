@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- **Page headers stay put**: on Disk and Apps the tabs no longer jump when you switch between sections with and without the side panel; the header is laid out for the width with the panel on all of them. The Classic style wraps its header in a narrow window too.
+
 ## 0.7.2
 
 - **Apps → Updates**: *Check now* asks the App Store about apps installed from it, Homebrew about its casks and the update feeds of apps that have one (Sparkle), and lists the apps with a newer version. App Store apps open their store page, casks are upgraded with `brew upgrade --cask`, the others are opened so they update themselves. Nothing is asked until you press the button.

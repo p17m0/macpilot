@@ -373,32 +373,56 @@ pub mod sp {
     pub const XXL: f32 = 32.0;
 }
 
+/// The width a page has while its side panel is open. Pages whose panel is there only on some of
+/// their sections lay the title bar out for this width on all of them, so the sections do not
+/// move when one of them is chosen. `shown` is the panel's width when it is open (remembered for
+/// the sections without it); `full` is the width of the page as it is now.
+pub fn width_with_panel(ui: &Ui, panel: &'static str, shown: Option<f32>, default: f32, full: f32) -> f32 {
+    let id = egui::Id::new(("panel_width", panel));
+    match shown {
+        Some(w) => {
+            ui.data_mut(|d| d.insert_temp(id, w));
+            full.min(PAGE_MAX)
+        }
+        None => (full - ui.data(|d| d.get_temp(id)).unwrap_or(default)).min(PAGE_MAX),
+    }
+}
+
 /// The top of every page, always in the same place: the title, the page's sections (a segmented
 /// control) next to it, and the page's own actions on the right. A subtitle goes underneath.
 pub fn title_bar(ui: &mut Ui, title: &str, subtitle: &str, sections: impl FnOnce(&mut Ui), actions: impl FnOnce(&mut Ui)) {
-    if classic() {
+    let width = ui.available_width();
+    title_bar_for(ui, width, title, subtitle, sections, actions);
+}
+
+/// [`title_bar`] laid out as if the page were `width` wide (see [`width_with_panel`]).
+pub fn title_bar_for(ui: &mut Ui, width: f32, title: &str, subtitle: &str, sections: impl FnOnce(&mut Ui), actions: impl FnOnce(&mut Ui)) {
+    // Classic has the title on a striped row of its own; the sections start the row under it.
+    let classic = classic();
+    if classic {
         title_text(ui, title);
+    }
+    // In a narrow window the three parts do not fit one row: the actions, and then the
+    // sections too, move to rows of their own. Their widths are known from the last frame.
+    let id = ui.id().with(("title_bar", title));
+    let known: Option<(f32, f32, f32)> = ui.data(|d| d.get_temp(id));
+    let (title_w, sections_w, actions_w) = known.unwrap_or_default();
+    let avail = width.min(ui.available_width());
+    let gap = sp::M * 2.0;
+    let sections_below = title_w + sections_w + if classic { 0.0 } else { gap } > avail;
+    // A page without actions has nothing to move.
+    let actions_below = actions_w > 0.0 && (sections_below || title_w + sections_w + actions_w + gap * 2.0 > avail);
+    let mut sections = Some(sections);
+    let mut actions = Some(actions);
+    let mut widths = (0.0, sections_w, actions_w);
+    let measure = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| ui.scope(|ui| add(ui)).response.rect.width();
+    let first_row = !classic || !sections_below || !actions_below;
+    if first_row {
         ui.horizontal(|ui| {
-            sections(ui);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
-        });
-    } else {
-        // In a narrow window the three parts do not fit one row: the actions, and then the
-        // sections too, move to rows of their own. Their widths are known from the last frame.
-        let id = ui.id().with(("title_bar", title));
-        let (title_w, sections_w, actions_w): (f32, f32, f32) = ui.data(|d| d.get_temp(id)).unwrap_or_default();
-        let avail = ui.available_width();
-        let gap = sp::M * 2.0;
-        let sections_below = title_w + sections_w + gap > avail;
-        // A page without actions has nothing to move.
-        let actions_below = actions_w > 0.0 && (sections_below || title_w + sections_w + actions_w + gap * 2.0 > avail);
-        let mut sections = Some(sections);
-        let mut actions = Some(actions);
-        let mut widths = (title_w, sections_w, actions_w);
-        let measure = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| ui.scope(|ui| add(ui)).response.rect.width();
-        ui.horizontal(|ui| {
-            widths.0 = ui.label(RichText::new(title).large_title()).rect.width();
-            ui.add_space(sp::M);
+            if !classic {
+                widths.0 = ui.label(RichText::new(title).large_title()).rect.width();
+                ui.add_space(sp::M);
+            }
             if !sections_below {
                 let f = sections.take().unwrap();
                 let mut f = Some(f);
@@ -412,24 +436,31 @@ pub fn title_bar(ui: &mut Ui, title: &str, subtitle: &str, sections: impl FnOnce
                 });
             }
         });
-        if let Some(f) = sections.take() {
+    }
+    if let Some(f) = sections.take() {
+        if first_row {
             ui.add_space(sp::S);
-            // Wider than the page itself (the smallest window): the row scrolls sideways.
-            let out = egui::ScrollArea::horizontal()
-                .id_salt(id.with("sections"))
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| ui.horizontal(|ui| f(ui)));
-            widths.1 = out.content_size.x;
         }
-        if let Some(f) = actions.take() {
-            ui.add_space(sp::S);
-            let mut f = Some(f);
-            ui.horizontal(|ui| widths.2 = measure(ui, &mut |ui| (f.take().unwrap())(ui)));
+        // Wider than the page itself (the smallest window): the row scrolls sideways, and a
+        // scroll bar says so.
+        let out = egui::ScrollArea::horizontal()
+            .id_salt(id.with("sections"))
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(ui, |ui| ui.horizontal(|ui| f(ui)));
+        widths.1 = out.content_size.x;
+    }
+    if let Some(f) = actions.take() {
+        ui.add_space(sp::S);
+        let mut f = Some(f);
+        ui.horizontal(|ui| widths.2 = measure(ui, &mut |ui| (f.take().unwrap())(ui)));
+    }
+    if widths != (title_w, sections_w, actions_w) {
+        ui.data_mut(|d| d.insert_temp(id, widths));
+        if known.is_none() {
+            // The first frame of a page is laid out blind: draw it again before it is seen.
+            ui.ctx().request_discard("title bar measured");
         }
-        if widths != (title_w, sections_w, actions_w) {
-            ui.data_mut(|d| d.insert_temp(id, widths));
-            ui.ctx().request_repaint();
-        }
+        ui.ctx().request_repaint();
     }
     if !subtitle.is_empty() {
         ui.label(RichText::new(subtitle).color(C::dim(ui)));

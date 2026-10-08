@@ -18,15 +18,19 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
         crate::access_view::show(g, ui);
         return;
     }
+    let mut panel = None;
     if !matches!(g.disk_mode, DiskMode::Dupes | DiskMode::Summary) {
-        egui::Panel::right("disk_detail").resizable(true).default_size(360.0).min_size(300.0).frame(w::side_frame(ui)).show(ui, |ui| {
+        let r = egui::Panel::right("disk_detail").resizable(true).default_size(360.0).min_size(300.0).frame(w::side_frame(ui)).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| detail(g, ui));
         });
+        panel = Some(r.response.rect.width());
     }
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
+        // Summary and Duplicates have no side panel: keep the sections where they are with it.
+        let width = w::width_with_panel(ui, "disk_detail", panel, 360.0, ui.available_width());
         w::centered(ui, |ui| {
             let mut scan = None;
-            w::title_bar(ui, tr("Disk"), "", |ui| mode_switch(g, ui), |ui| scan = scan_actions(ui));
+            w::title_bar_for(ui, width, tr("Disk"), "", |ui| mode_switch(g, ui), |ui| scan = scan_actions(ui));
             if let Some(p) = scan {
                 let p = p.unwrap_or_else(|| g.cwd.clone());
                 g.start_scan(p);
