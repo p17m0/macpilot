@@ -1,8 +1,7 @@
 //! Generates the app icon: `cargo run --example make_icon --features dev-tools -- assets/icon.png`
 //!
-//! A macOS-style squircle with a gauge (the "pilot" part) and a sparkle (the "cleaner" part).
-
-use std::f32::consts::{PI, TAU};
+//! A macOS-style squircle with a pixel-art Macintosh in aviator goggles: the pilot of your Mac,
+//! drawn on the same 16×16 grid as the little computer of the empty states (`widgets::PIXEL_PILOT`).
 
 #[derive(Clone, Copy)]
 struct Rgba(f32, f32, f32, f32);
@@ -36,6 +35,36 @@ fn cover(d: f32) -> f32 {
     (0.5 - d).clamp(0.0, 1.0)
 }
 
+/// The pilot on a 16×16 grid: `#` ink, `+` the case, `.` the screen, `o` the goggles' strap and
+/// frame, `G` a lens, `w` its glint. Keep in sync with `PIXEL_PILOT` in src/gui/widgets.rs.
+const PILOT: [&str; 16] = [
+    "  ############  ",
+    " #++++++++++++# ",
+    " #+##########+# ",
+    " #+#........#+# ",
+    " #oooooooooooo# ",
+    " #+#wGGoowGG#+# ",
+    " #+#GGGooGGG#+# ",
+    " #+#.#....#.#+# ",
+    " #+#..####..#+# ",
+    " #+#........#+# ",
+    " #+##########+# ",
+    " #++++++++++++# ",
+    " #+++++++###++# ",
+    " #++++++++++++# ",
+    "  ############  ",
+    "   ##########   ",
+];
+
+/// The grid cell under a point, if any.
+fn cell(x: f32, y: f32, origin: (f32, f32), px: f32) -> Option<u8> {
+    let (gx, gy) = (((x - origin.0) / px).floor(), ((y - origin.1) / px).floor());
+    if !(0.0..16.0).contains(&gx) || !(0.0..16.0).contains(&gy) {
+        return None;
+    }
+    Some(PILOT[gy as usize].as_bytes()[gx as usize]).filter(|c| *c != b' ')
+}
+
 fn main() {
     let out = std::env::args().nth(1).unwrap_or("assets/icon.png".into());
     let size = 1024u32;
@@ -45,14 +74,10 @@ fn main() {
     let cy = c - 8.0; // body is slightly above center, shadow below
     let mut img = image::RgbaImage::new(size, size);
 
-    // Gauge geometry.
-    let gc = (c, cy + 40.0);
-    let ring_r = 250.0;
-    let ring_w = 58.0;
-    let start = PI * 0.75; // 135°, the arc opens at the bottom
-    let sweep = PI * 1.5; // 270°
-    let value = 0.64;
-    let needle_a = start + sweep * value;
+    // The pilot: whole pixels of 38 px, centered in the body.
+    let px = 38.0;
+    let origin = (c - 8.0 * px, cy - 8.0 * px + 6.0);
+    let ink = [0.106, 0.133, 0.200];
 
     let ss = 3;
     for y in 0..size {
@@ -60,137 +85,47 @@ fn main() {
             let mut acc = [0f32; 4];
             for sy in 0..ss {
                 for sx in 0..ss {
-                    let px = x as f32 + (sx as f32 + 0.5) / ss as f32;
-                    let py = y as f32 + (sy as f32 + 0.5) / ss as f32;
+                    let fx = x as f32 + (sx as f32 + 0.5) / ss as f32;
+                    let fy = y as f32 + (sy as f32 + 0.5) / ss as f32;
                     let mut col = Rgba(0.0, 0.0, 0.0, 0.0);
 
                     // Soft shadow under the body.
-                    let ds = squircle(px - c, py - (cy + 14.0), half - 6.0);
+                    let ds = squircle(fx - c, fy - (cy + 14.0), half - 6.0);
                     let shadow = (1.0 - (ds / 28.0).clamp(0.0, 1.0)).powi(2) * 0.35;
                     if ds < 28.0 {
                         col = over(col, Rgba(0.0, 0.0, 0.08, shadow));
                     }
 
-                    let d = squircle(px - c, py - cy, half);
+                    let d = squircle(fx - c, fy - cy, half);
                     let body = cover(d);
                     if body > 0.0 {
-                        // Diagonal gradient: bright azure → deep indigo → violet.
-                        let t = ((px - (c - half)) + (py - (cy - half))) / (4.0 * half);
-                        let base = if t < 0.5 {
-                            lerp3([0.16, 0.58, 1.0], [0.29, 0.33, 0.96], t * 2.0)
-                        } else {
-                            lerp3([0.29, 0.33, 0.96], [0.50, 0.22, 0.88], (t - 0.5) * 2.0)
-                        };
-                        let mut rgb = base;
-                        // Glossy top highlight.
-                        let hl = (1.0 - ((py - (cy - half)) / (half * 1.1))).clamp(0.0, 1.0).powi(2) * 0.16;
+                        // Sunny yellow, warmer towards the bottom, with a soft glow behind the pilot.
+                        let t = (fy - (cy - half)) / (2.0 * half);
+                        let mut rgb = lerp3([1.0, 0.87, 0.32], [1.0, 0.66, 0.16], t);
+                        let glow = (1.0 - (((fx - c).powi(2) + (fy - cy).powi(2)).sqrt() / (half * 1.05))).clamp(0.0, 1.0);
+                        rgb = lerp3(rgb, [1.0, 0.95, 0.62], glow * 0.45);
+                        // Glossy top highlight and a thin inner rim.
+                        let hl = (1.0 - ((fy - (cy - half)) / (half * 0.9))).clamp(0.0, 1.0).powi(2) * 0.22;
                         rgb = lerp3(rgb, [1.0, 1.0, 1.0], hl);
-                        // Thin inner rim.
                         if d > -6.0 {
-                            rgb = lerp3(rgb, [1.0, 1.0, 1.0], 0.12);
+                            rgb = lerp3(rgb, [1.0, 1.0, 1.0], 0.22);
                         }
                         col = over(col, Rgba(rgb[0], rgb[1], rgb[2], body));
 
-                        let dx = px - gc.0;
-                        let dy = py - gc.1;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        let mut ang = dy.atan2(dx);
-                        if ang < 0.0 {
-                            ang += TAU;
+                        // The pilot's hard pixel shadow, down and to the right.
+                        if cell(fx - 16.0, fy - 16.0, origin, px).is_some() {
+                            col = over(col, Rgba(0.55, 0.25, 0.0, 0.30));
                         }
-                        let mut rel = ang - start;
-                        if rel < 0.0 {
-                            rel += TAU;
-                        }
-                        // Dark dial face.
-                        let face = cover(dist - (ring_r + ring_w / 2.0 + 18.0));
-                        if face > 0.0 {
-                            col = over(col, Rgba(0.05, 0.06, 0.20, face * 0.28));
-                        }
-                        // Track + colored value arc, with rounded caps.
-                        let ring_d = (dist - ring_r).abs() - ring_w / 2.0;
-                        let cap = |a: f32| {
-                            let (ex, ey) = (gc.0 + a.cos() * ring_r, gc.1 + a.sin() * ring_r);
-                            ((px - ex).powi(2) + (py - ey).powi(2)).sqrt() - ring_w / 2.0
-                        };
-                        let in_arc = rel <= sweep;
-                        let arc_d = if in_arc { ring_d } else { cap(start).min(cap(start + sweep)) };
-                        let a_arc = cover(arc_d);
-                        if a_arc > 0.0 {
-                            let near_start = cap(start) < cap(start + sweep);
-                            // Round caps take the color of the arc end they belong to.
-                            let tt = if in_arc {
-                                (rel / sweep).clamp(0.0, 1.0)
-                            } else if near_start {
-                                0.0
-                            } else {
-                                1.0
+                        if let Some(ch) = cell(fx, fy, origin, px) {
+                            let gy = (fy - origin.1) / (16.0 * px);
+                            let rgb = match ch {
+                                b'+' => lerp3([1.0, 0.985, 0.93], [0.95, 0.91, 0.82], gy),
+                                b'.' => lerp3([0.70, 0.93, 1.0], [0.48, 0.80, 1.0], ((gy - 0.19) / 0.44).clamp(0.0, 1.0)),
+                                b'G' => lerp3([1.0, 0.52, 0.25], [0.95, 0.30, 0.20], ((gy - 0.3125) / 0.125).clamp(0.0, 1.0)),
+                                b'w' => [1.0, 0.93, 0.80],
+                                _ => ink,
                             };
-                            let filled = if in_arc { tt <= value } else { near_start };
-                            let rgb = if filled {
-                                // green → yellow → orange along the arc
-                                if tt < 0.5 {
-                                    lerp3([0.20, 0.90, 0.55], [1.0, 0.86, 0.25], tt * 2.0)
-                                } else {
-                                    lerp3([1.0, 0.86, 0.25], [1.0, 0.55, 0.20], (tt - 0.5) * 2.0)
-                                }
-                            } else {
-                                [1.0, 1.0, 1.0]
-                            };
-                            let alpha = if filled { 1.0 } else { 0.22 };
-                            col = over(col, Rgba(rgb[0], rgb[1], rgb[2], a_arc * alpha));
-                        }
-                        // Ticks inside the ring.
-                        for i in 0..=8 {
-                            let a = start + sweep * i as f32 / 8.0;
-                            let (ux, uy) = (a.cos(), a.sin());
-                            let along = dx * ux + dy * uy;
-                            let across = (dx * uy - dy * ux).abs();
-                            let td = (across - 5.0).max((along - (ring_r - 52.0)).abs() - 14.0);
-                            let at = cover(td);
-                            if at > 0.0 {
-                                col = over(col, Rgba(1.0, 1.0, 1.0, at * 0.55));
-                            }
-                        }
-                        // Needle: a tapered bar with a round hub.
-                        let (ux, uy) = (needle_a.cos(), needle_a.sin());
-                        let along = dx * ux + dy * uy;
-                        let across = (dx * uy - dy * ux).abs();
-                        let len = ring_r - 40.0;
-                        let width = lerp(15.0, 4.0, (along / len).clamp(0.0, 1.0));
-                        let nd = (across - width).max(-along - 10.0).max(along - len);
-                        let an = cover(nd);
-                        if an > 0.0 {
-                            col = over(col, Rgba(1.0, 1.0, 1.0, an));
-                        }
-                        let hub = cover(dist - 34.0);
-                        if hub > 0.0 {
-                            col = over(col, Rgba(1.0, 1.0, 1.0, hub));
-                        }
-                        let hub_in = cover(dist - 13.0);
-                        if hub_in > 0.0 {
-                            col = over(col, Rgba(0.32, 0.30, 0.93, hub_in));
-                        }
-
-                        // Sparkle (four-point star) at the top right: "clean".
-                        let (sx0, sy0) = (c + 268.0, cy - 262.0);
-                        let (qx, qy) = ((px - sx0).abs(), (py - sy0).abs());
-                        let r_big = 86.0;
-                        // Astroid-like star: |x|^p + |y|^p <= r^p with p < 1.
-                        let p = 0.55;
-                        let star = (qx / r_big).powf(p) + (qy / r_big).powf(p);
-                        let sd = (star - 1.0) * 40.0;
-                        let asd = cover(sd);
-                        if asd > 0.0 {
-                            col = over(col, Rgba(1.0, 1.0, 1.0, asd));
-                        }
-                        // Small companion sparkle.
-                        let (sx1, sy1) = (c + 158.0, cy - 318.0);
-                        let (qx, qy) = ((px - sx1).abs(), (py - sy1).abs());
-                        let star2 = (qx / 34.0).powf(p) + (qy / 34.0).powf(p);
-                        let asd2 = cover((star2 - 1.0) * 16.0);
-                        if asd2 > 0.0 {
-                            col = over(col, Rgba(1.0, 1.0, 1.0, asd2 * 0.85));
+                            col = over(col, Rgba(rgb[0], rgb[1], rgb[2], body));
                         }
                     }
                     acc[0] += col.0 * col.3;

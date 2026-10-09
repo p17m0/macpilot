@@ -141,7 +141,7 @@ fn advice(g: &mut Gui, ui: &mut Ui, b: &Battery) {
             tr("Low battery"),
             tr("Low Power Mode makes the charge last longer: macOS slows the processor a little and dims the screen."),
         );
-        if ui.button(tr("Battery settings…")).clicked() {
+        if w::button(ui, tr("Battery settings…")).clicked() {
             battery::open_battery_settings();
         }
         any = true;

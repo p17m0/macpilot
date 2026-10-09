@@ -215,7 +215,7 @@ fn list(g: &mut Gui, ui: &mut Ui) {
         ui.add_space(w::sp::XL);
         if disk::is_excluded(&g.cwd) {
             ui.label(RichText::new(e).color(C::dim(ui)));
-            if ui.button(tr("Privacy settings…")).clicked() {
+            if w::button(ui, tr("Privacy settings…")).clicked() {
                 g.open_privacy();
             }
         } else {
@@ -227,7 +227,7 @@ fn list(g: &mut Gui, ui: &mut Ui) {
     if !g.scan.as_ref().is_some_and(|s| s.covers(&g.cwd)) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(tr("This folder is outside the scanned area — folder sizes are unknown.")).color(C::yellow()));
-            if ui.button(tr("Scan it")).clicked() {
+            if w::button(ui, tr("Scan it")).clicked() {
                 let p = g.cwd.clone();
                 g.start_scan(p);
             }
@@ -289,11 +289,11 @@ fn list(g: &mut Gui, ui: &mut Ui) {
                 let p = e.path.clone();
                 let is_dir = e.is_dir && !e.is_link;
                 resp.context_menu(|ui| {
-                    if is_dir && ui.button(tr("Open")).clicked() {
+                    if is_dir && w::button(ui, tr("Open")).clicked() {
                         open = Some(p.clone());
                         ui.close();
                     }
-                    if ui.button(tr("Show in Finder")).clicked() {
+                    if w::button(ui, tr("Show in Finder")).clicked() {
                         macpilot::trash::reveal_in_finder(&p);
                         ui.close();
                     }
@@ -624,7 +624,7 @@ fn summary(g: &mut Gui, ui: &mut Ui) {
             ui.data_mut(|d| d.insert_temp(hover_id, now));
             if hidden.is_some_and(|h| h > 5_000_000_000) && !g.full_disk_access {
                 ui.add_space(w::sp::S);
-                if ui.button(tr("Open Full Disk Access settings…")).clicked() {
+                if w::button(ui, tr("Open Full Disk Access settings…")).clicked() {
                     macpilot::open_full_disk_access_settings();
                 }
             }
@@ -1113,7 +1113,8 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
     });
     if is_dir {
         ui.add_space(w::sp::S);
-        let r = ui.button(tr("Exclude from MacPilot")).on_hover_text(tr("MacPilot will never open this folder again. Undo in Settings → Privacy."));
+        let r =
+            w::button(ui, tr("Exclude from MacPilot")).on_hover_text(tr("MacPilot will never open this folder again. Undo in Settings → Privacy."));
         if r.clicked() {
             g.settings.set_excluded(&path, true);
             g.disk_sel = None;
@@ -1209,7 +1210,7 @@ fn snapshots(g: &mut Gui, ui: &mut Ui, list: &[String]) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr("Time Machine snapshots on this disk")).section());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if list.len() > 1 && ui.button(tr("Delete all…")).clicked() {
+            if list.len() > 1 && w::button(ui, tr("Delete all…")).clicked() {
                 delete = Some(list.to_vec());
             }
         });
@@ -1241,7 +1242,7 @@ fn snapshots(g: &mut Gui, ui: &mut Ui, list: &[String]) {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(tr("Delete…")).clicked() {
+                    if w::button(ui, tr("Delete…")).clicked() {
                         delete = Some(vec![name.clone()]);
                     }
                 });

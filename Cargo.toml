@@ -1,6 +1,6 @@
 [package]
 name = "macpilot"
-version = "0.7.5"
+version = "0.8.0"
 repository = "https://github.com/p17m0/macpilot"
 edition = "2024"
 rust-version = "1.85"

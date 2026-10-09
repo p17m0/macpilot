@@ -924,4 +924,12 @@ pub static TABLE: &[(&str, &str, &str, &str, &str)] = &[
     ("⇧⌘K from any page", "⇧⌘K с любой страницы", "⇧⌘K depuis n’importe quelle page", "⇧⌘K desde cualquier página", "⇧⌘K von jeder Seite"),
     ("The history is kept on this Mac only.", "История хранится только на этом Mac.", "L’historique reste sur ce Mac.", "El historial se guarda solo en este Mac.", "Der Verlauf bleibt nur auf diesem Mac."),
     ("Moves the safe junk to the Trash after one confirmation. ⇧⌘K from any page.", "Отправляет безопасный мусор в Корзину после одного подтверждения. ⇧⌘K с любой страницы.", "Place les éléments sûrs dans la corbeille après une seule confirmation. ⇧⌘K depuis n’importe quelle page.", "Mueve la basura segura a la Papelera tras una sola confirmación. ⇧⌘K desde cualquier página.", "Legt den sicheren Datenmüll nach einer Bestätigung in den Papierkorb. ⇧⌘K von jeder Seite."),
+    ("Colors", "Цвета", "Couleurs", "Colores", "Farben"),
+    ("Graphite", "Графит", "Graphite", "Grafito", "Graphit"),
+    ("Ocean", "Океан", "Océan", "Océano", "Ozean"),
+    ("Forest", "Лес", "Forêt", "Bosque", "Wald"),
+    ("Sunset", "Закат", "Coucher de soleil", "Atardecer", "Sonnenuntergang"),
+    ("Rose", "Роза", "Rose", "Rosa", "Rosé"),
+    ("Midnight", "Полночь", "Minuit", "Medianoche", "Mitternacht"),
+    ("The look of the whole app: the standard one, or after a classic computer or console.", "Вид всего приложения: стандартный или в духе классического компьютера или приставки.", "L’allure de toute l’app : standard, ou d’après un ordinateur ou une console classique.", "El aspecto de toda la app: el estándar, o inspirado en un ordenador o una consola clásicos.", "Das Aussehen der ganzen App: Standard oder nach einem klassischen Computer oder einer Konsole."),
 ];

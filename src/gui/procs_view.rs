@@ -377,7 +377,7 @@ fn ctx_menu(ui: &mut Ui, sel: &Sel, is_app: bool, out: &mut Option<(Sel, CtxActi
     ];
     for (label, a, red) in items {
         let text = if red { RichText::new(label).color(C::red()) } else { RichText::new(label) };
-        if ui.button(text).clicked() {
+        if w::button(ui, text).clicked() {
             *out = Some((sel.clone(), a));
             ui.close();
         }

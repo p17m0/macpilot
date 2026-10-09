@@ -353,8 +353,8 @@ impl Gui {
             Some(l) => macpilot::i18n::set_lang(l),
             None => settings.apply_lang(),
         }
-        widgets::setup_style(&cc.egui_ctx, settings.style);
-        apply_theme(&cc.egui_ctx, settings.theme);
+        widgets::setup_style(&cc.egui_ctx, settings.style, settings.palette);
+        apply_theme(&cc.egui_ctx, settings.theme, settings.style);
         let ctx = cc.egui_ctx.clone();
 
         // Processes are collected in the background so the window never stutters.
@@ -612,12 +612,16 @@ impl Gui {
             self.shot = Some(Shot { path: PathBuf::from(p), started: Instant::now(), requested: false, sent: false });
         }
         if let Ok(st) = std::env::var("MACPILOT_STYLE") {
-            self.settings.style = if st == "classic" { macpilot::settings::UiStyle::Classic } else { macpilot::settings::UiStyle::Standard };
+            self.settings.style = macpilot::settings::UiStyle::from_code(&st).unwrap_or(macpilot::settings::UiStyle::Standard);
+            self.apply_style();
+        }
+        if let Some(p) = std::env::var("MACPILOT_PALETTE").ok().and_then(|p| macpilot::settings::Palette::from_code(&p)) {
+            self.settings.palette = p;
             self.apply_style();
         }
         match std::env::var("MACPILOT_THEME").as_deref() {
-            Ok("dark") => apply_theme(&self.ctx, Theme::Dark),
-            Ok("light") => apply_theme(&self.ctx, Theme::Light),
+            Ok("dark") => apply_theme(&self.ctx, Theme::Dark, self.settings.style),
+            Ok("light") => apply_theme(&self.ctx, Theme::Light, self.settings.style),
             _ => {}
         }
         // MACPILOT_FAKE_UPDATE=9.9.9 (developer screenshots): look as if that version were out.
@@ -1519,9 +1523,10 @@ impl Gui {
         self.changes = Some(result);
     }
 
-    /// Apply the chosen style: colors and fonts.
+    /// Apply the chosen style: colors and fonts, and light or dark where the style decides it.
     pub fn apply_style(&mut self) {
-        widgets::setup_style(&self.ctx, self.settings.style);
+        widgets::setup_style(&self.ctx, self.settings.style, self.settings.palette);
+        apply_theme(&self.ctx, self.settings.theme, self.settings.style);
     }
 
     /// Send a notification unless the same one went out within `every`.
@@ -1843,11 +1848,11 @@ impl Gui {
     fn handle_shot(&mut self, _ctx: &egui::Context) {}
 }
 
-pub fn apply_theme(ctx: &egui::Context, t: Theme) {
-    ctx.set_theme(match t {
-        Theme::System => egui::ThemePreference::System,
-        Theme::Light => egui::ThemePreference::Light,
-        Theme::Dark => egui::ThemePreference::Dark,
+pub fn apply_theme(ctx: &egui::Context, t: Theme, style: macpilot::settings::UiStyle) {
+    ctx.set_theme(match (style.fixed_dark(), t) {
+        (Some(true), _) | (None, Theme::Dark) => egui::ThemePreference::Dark,
+        (Some(false), _) | (None, Theme::Light) => egui::ThemePreference::Light,
+        (None, Theme::System) => egui::ThemePreference::System,
     });
 }
 

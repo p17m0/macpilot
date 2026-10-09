@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- **Color themes**: Settings → Colors offers ten palettes for the standard style — MacPilot (the blue it always had), Graphite, Ocean, Forest, Sunset, Rose, Nord, Dracula, Solarized and Midnight (true black in the dark theme). Each has a light and a dark variant and follows the Appearance setting; the accent, the backgrounds, the cards and the buttons all take the palette's tint.
+- **Retro styles** (Settings → Style): next to the standard look and the Macintosh there are now **Windows 98** (gray 3D bevels, a navy title bar, block progress bars, check boxes, MS Sans Serif), **Windows XP** (the blue Luna title bar, green buttons, an orange glow under the mouse, Tahoma and Trebuchet), **Nintendo** (the gray, black and red of the NES with chunky outlines), **Game Boy** (four shades of green), **PlayStation** (console gray with the colors of △ ○ ✕ □) and **PlayStation 2** (the dark blue glow of its browser). Each brings its own colors, typeface, title bar, buttons and switches; styles that are light or dark by nature ignore the Appearance setting.
+- **The Macintosh style, closer to the original**: text is set in Geneva (pixels stay for titles and names), so long lines read well in every language; the title bar has a close box; the main button is the thick-outlined default button; the empty part of meters is a real 1-bit dither instead of gray.
+- **New icon**: a pixel-art Macintosh in aviator goggles — the pilot of your Mac — on a yellow tile, from the same 16×16 grid as the little computer of the empty states. The sidebar shows it too; in the Classic style it is drawn in ink on paper.
+
 ## 0.7.5
 
 - **Quick cleanup**: one confirmation moves everything ticked in Cleanup (the safe places, unless you changed that) to the Trash, without opening the list — the button next to *Recommendations* on the Overview, *Quick cleanup…* in the menu bar menu, or ⇧⌘K on any page.

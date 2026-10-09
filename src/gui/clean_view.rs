@@ -52,7 +52,7 @@ fn history(g: &mut Gui, ui: &mut Ui) {
             ui.label(RichText::new(tr("Kept for 90 days. Anything still in the Trash can be put back where it was.")).color(C::dim(ui)));
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(tr("Open the Trash")).clicked() {
+            if w::button(ui, tr("Open the Trash")).clicked() {
                 macpilot::trash::open_trash();
             }
         });
@@ -95,7 +95,7 @@ fn history(g: &mut Gui, ui: &mut Ui) {
                 });
                 row.col(|ui| match e.state {
                     State::InTrash => {
-                        if ui.button(tr("Put Back")).on_hover_text(tr("Move it from the Trash to where it was")).clicked() {
+                        if w::button(ui, tr("Put Back")).on_hover_text(tr("Move it from the Trash to where it was")).clicked() {
                             back = Some((e.path.clone(), e.at));
                         }
                     }
@@ -235,7 +235,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                             ui.add(egui::Label::new(RichText::new(txt).color(color)).selectable(false));
                         });
                         row.col(|ui| {
-                            if ui.button(tr("Open")).clicked() {
+                            if w::button(ui, tr("Open")).clicked() {
                                 open = Some(i);
                             }
                         });
@@ -248,11 +248,11 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                                 clean_now = Some(vec![i]);
                                 ui.close();
                             }
-                            if ui.button(tr("Open")).clicked() {
+                            if w::button(ui, tr("Open")).clicked() {
                                 open = Some(i);
                                 ui.close();
                             }
-                            if ui.button(tr("Show in Finder")).clicked() {
+                            if w::button(ui, tr("Show in Finder")).clicked() {
                                 macpilot::trash::reveal_in_finder(&t.path);
                                 ui.close();
                             }
@@ -608,7 +608,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                     );
                 });
                 row.response().context_menu(|ui| {
-                    if ui.button(tr("Show in Finder")).clicked() {
+                    if w::button(ui, tr("Show in Finder")).clicked() {
                         macpilot::trash::reveal_in_finder(&j.path);
                         ui.close();
                     }

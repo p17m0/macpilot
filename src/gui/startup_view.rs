@@ -135,11 +135,11 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     let p = it.path.clone();
                     let item = it.clone();
                     row.response().context_menu(|ui| {
-                        if ui.button(tr("Show in Finder")).clicked() {
+                        if w::button(ui, tr("Show in Finder")).clicked() {
                             macpilot::trash::reveal_in_finder(&p);
                             ui.close();
                         }
-                        if item.scope == Scope::User && ui.button(RichText::new(tr("Move to Trash…")).color(C::red())).clicked() {
+                        if item.scope == Scope::User && w::button(ui, RichText::new(tr("Move to Trash…")).color(C::red())).clicked() {
                             remove = Some(item.clone());
                             ui.close();
                         }

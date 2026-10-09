@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, RichText, Ui};
 use macpilot::i18n::Lang;
-use macpilot::settings::{Theme, UiStyle};
+use macpilot::settings::{Palette, Theme, UiStyle};
 use macpilot::{tr, trf};
 
 use crate::widgets::{self as w, C, Level, Txt};
@@ -137,8 +137,12 @@ fn look(g: &mut Gui, ui: &mut Ui) {
     }
 
     let mut style = g.settings.style;
-    row(ui, tr("Style"), tr("Classic looks like the first Macintosh: black and white, with a pixel font."), |ui| {
-        w::segmented(ui, &mut style, &[(UiStyle::Standard, tr("Standard")), (UiStyle::Classic, tr("Classic Macintosh"))]);
+    row(ui, tr("Style"), tr("The look of the whole app: the standard one, or after a classic computer or console."), |ui| {
+        egui::ComboBox::from_id_salt("style").selected_text(style.name()).width(180.0).show_ui(ui, |ui| {
+            for st in UiStyle::ALL {
+                ui.selectable_value(&mut style, st, st.name());
+            }
+        });
     });
     if style != g.settings.style {
         g.settings.style = style;
@@ -146,14 +150,54 @@ fn look(g: &mut Gui, ui: &mut Ui) {
         g.save_settings();
     }
 
-    let mut theme = g.settings.theme;
-    row(ui, tr("Appearance"), "", |ui| {
-        w::segmented(ui, &mut theme, &[(Theme::System, tr("System")), (Theme::Light, tr("Light")), (Theme::Dark, tr("Dark"))]);
-    });
-    if theme != g.settings.theme {
-        g.settings.theme = theme;
-        crate::apply_theme(ui.ctx(), theme);
-        g.save_settings();
+    // The other styles bring their own colors.
+    if g.settings.style == UiStyle::Standard {
+        let mut palette = g.settings.palette;
+        row(ui, tr("Colors"), palette.name(), |ui| palette_picker(ui, &mut palette));
+        if palette != g.settings.palette {
+            g.settings.palette = palette;
+            g.apply_style();
+            g.save_settings();
+        }
+    }
+
+    // Light or dark is part of most retro styles.
+    if g.settings.style.fixed_dark().is_none() {
+        let mut theme = g.settings.theme;
+        row(ui, tr("Appearance"), "", |ui| {
+            w::segmented(ui, &mut theme, &[(Theme::System, tr("System")), (Theme::Light, tr("Light")), (Theme::Dark, tr("Dark"))]);
+        });
+        if theme != g.settings.theme {
+            g.settings.theme = theme;
+            crate::apply_theme(ui.ctx(), theme, g.settings.style);
+            g.save_settings();
+        }
+    }
+}
+
+/// A row of swatches, one per palette: its background with a dot of its accent.
+fn palette_picker(ui: &mut Ui, value: &mut Palette) {
+    let dark = C::dark(ui);
+    ui.spacing_mut().item_spacing.x = 6.0;
+    // The row is laid out from the right: add the swatches reversed, so they read in order.
+    for p in Palette::ALL.into_iter().rev() {
+        let pl = w::pal(p, dark);
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::click());
+        let resp = resp.on_hover_text(p.name()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, *value == p, p.name()));
+        let painter = ui.painter();
+        let inner = rect.shrink(3.0);
+        painter.rect_filled(inner, 7, pl.panel);
+        painter.rect_stroke(inner, 7, egui::Stroke::new(1.0, pl.track), egui::StrokeKind::Inside);
+        painter.circle_filled(inner.center(), 6.0, pl.accent);
+        if *value == p {
+            painter.rect_stroke(rect, 9, egui::Stroke::new(2.0, C::accent()), egui::StrokeKind::Inside);
+        } else if resp.hovered() {
+            painter.rect_stroke(rect, 9, egui::Stroke::new(1.0, C::dim(ui)), egui::StrokeKind::Inside);
+        }
+        if resp.clicked() {
+            *value = p;
+        }
     }
 }
 
@@ -177,7 +221,7 @@ fn behaviour(g: &mut Gui, ui: &mut Ui) {
             tr("Launch at login is switched off in System Settings"),
             tr("Turn MacPilot on in System Settings → General → Login Items."),
         );
-        if ui.button(tr("Login Items settings…")).clicked() {
+        if w::button(ui, tr("Login Items settings…")).clicked() {
             crate::mac::open_login_items_settings();
         }
     }
@@ -248,7 +292,7 @@ fn privacy(g: &mut Gui, ui: &mut Ui) {
 
 fn permissions(g: &Gui, ui: &mut Ui) {
     row(ui, tr("Full Disk Access"), tr("Lets MacPilot see other apps' data too (Docker, virtual machines). Optional."), |ui| {
-        if ui.button(tr("Open…")).clicked() {
+        if w::button(ui, tr("Open…")).clicked() {
             macpilot::open_full_disk_access_settings();
         }
         if g.full_disk_access {
@@ -262,7 +306,7 @@ fn permissions(g: &Gui, ui: &mut Ui) {
         tr("Files and Folders"),
         tr("What you allowed when macOS asked about Desktop, Documents and Downloads. Change or take it back there."),
         |ui| {
-            if ui.button(tr("Open…")).clicked() {
+            if w::button(ui, tr("Open…")).clicked() {
                 macpilot::open_files_and_folders_settings();
             }
         },

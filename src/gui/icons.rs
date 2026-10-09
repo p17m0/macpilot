@@ -16,7 +16,7 @@ const PX: usize = 64;
 const PER_FRAME: usize = 6;
 
 /// `None` path: the generic Unix executable icon.
-type Key = (Option<PathBuf>, bool);
+type Key = (Option<PathBuf>, &'static str);
 
 #[derive(Default)]
 struct Cache {
@@ -32,7 +32,7 @@ thread_local! {
 /// `None` while waiting for its turn; `Some(None)` when macOS gave no icon.
 fn texture(ctx: &egui::Context, path: Option<&Path>) -> Option<Option<TextureHandle>> {
     let classic = w::classic();
-    let key = (path.map(Path::to_path_buf), classic);
+    let key = (path.map(Path::to_path_buf), w::style().code());
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         if let Some(t) = c.icons.get(&key) {
@@ -52,6 +52,14 @@ fn texture(ctx: &egui::Context, path: Option<&Path>) -> Option<Option<TextureHan
             if classic {
                 for p in px.chunks_exact_mut(4) {
                     let l = (0.30 * p[0] as f32 + 0.59 * p[1] as f32 + 0.11 * p[2] as f32) as u8;
+                    if w::style() == macpilot::settings::UiStyle::GameBoy {
+                        // Shades of green instead of gray (the pixels are premultiplied by alpha).
+                        let (a, t) = (p[3] as f32 / 255.0, l as f32 / (p[3].max(1)) as f32);
+                        let (ink, paper) = (C::fg(), C::paper());
+                        let m = |x: u8, y: u8| ((x as f32 + (y as f32 - x as f32) * t.min(1.0)) * a) as u8;
+                        (p[0], p[1], p[2]) = (m(ink.r(), paper.r()), m(ink.g(), paper.g()), m(ink.b(), paper.b()));
+                        continue;
+                    }
                     p[..3].fill(l);
                 }
             }

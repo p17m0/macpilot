@@ -506,7 +506,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         ui.set_min_width(ui.available_width());
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 40.0), egui::Sense::hover());
-                            ui.painter().rect_filled(rect, if w::classic() { 0 } else { 3 }, r.color);
+                            ui.painter().rect_filled(rect, w::rad(3), r.color);
                             // The button takes its room first; the text wraps in what is left.
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if w::plain_button(ui, r.button).clicked() {

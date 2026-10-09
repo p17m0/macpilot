@@ -71,14 +71,14 @@ pub fn folder_checks(g: &mut Gui, ui: &mut Ui) -> bool {
         }
         let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| fmt::path(p));
         folder_row(ui, &name, p, |ui| {
-            if ui.button(tr("Remove")).on_hover_text(tr("Scan this folder again")).clicked() {
+            if w::button(ui, tr("Remove")).on_hover_text(tr("Scan this folder again")).clicked() {
                 g.settings.set_excluded(p, false);
                 changed = true;
             }
         });
     }
     ui.add_space(w::sp::S);
-    if ui.button(tr("Add folder…")).clicked() {
+    if w::button(ui, tr("Add folder…")).clicked() {
         for p in crate::mac::choose_folders(tr("Don't scan"), tr("MacPilot will never open the folders you choose.")) {
             g.settings.set_excluded(&p, true);
             changed = true;

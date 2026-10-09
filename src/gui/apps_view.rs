@@ -143,7 +143,7 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
                         Source::Homebrew { .. } => (tr("Update"), tr("Runs `brew upgrade --cask` in the background")),
                         Source::Sparkle => (tr("Open the app"), tr("The app offers the update when it starts")),
                     };
-                    if ui.button(label).on_hover_text(hover).clicked() {
+                    if w::button(ui, label).on_hover_text(hover).clicked() {
                         go = Some(u.clone());
                     }
                 });
@@ -444,7 +444,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                 });
                 row.response().context_menu(|ui| {
                     for (p, _) in &o.items {
-                        if ui.button(trf("Show {0} in Finder", &[&fmt::path(p)])).clicked() {
+                        if w::button(ui, trf("Show {0} in Finder", &[&fmt::path(p)])).clicked() {
                             macpilot::trash::reveal_in_finder(p);
                             ui.close();
                         }

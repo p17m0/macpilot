@@ -12,13 +12,137 @@ pub enum Theme {
     Dark,
 }
 
-/// Look of the app.
+/// Look of the app: the standard one, or one after a classic computer or console.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UiStyle {
     /// The standard look.
     Standard,
-    /// Black and white like the first Macintosh: 1-pixel lines, square corners, pixel font.
+    /// Black and white like the first Macintosh: 1-pixel lines, square corners, pixel titles.
     Classic,
+    /// Gray 3D bevels, navy title bars.
+    Win98,
+    /// Luna: blue title bars, green buttons, beige panels.
+    WinXp,
+    /// The gray, black and red of the NES.
+    Nes,
+    /// Four shades of green.
+    GameBoy,
+    /// PlayStation gray with the colors of its four buttons.
+    Ps1,
+    /// The dark blue glow of the PlayStation 2 browser.
+    Ps2,
+}
+
+impl UiStyle {
+    pub const ALL: [UiStyle; 8] =
+        [UiStyle::Standard, UiStyle::Classic, UiStyle::Win98, UiStyle::WinXp, UiStyle::Nes, UiStyle::GameBoy, UiStyle::Ps1, UiStyle::Ps2];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            UiStyle::Standard => "standard",
+            UiStyle::Classic => "classic",
+            UiStyle::Win98 => "win98",
+            UiStyle::WinXp => "winxp",
+            UiStyle::Nes => "nes",
+            UiStyle::GameBoy => "gameboy",
+            UiStyle::Ps1 => "ps1",
+            UiStyle::Ps2 => "ps2",
+        }
+    }
+
+    pub fn from_code(s: &str) -> Option<UiStyle> {
+        UiStyle::ALL.into_iter().find(|p| p.code() == s)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            UiStyle::Standard => crate::tr("Standard"),
+            UiStyle::Classic => crate::tr("Classic Macintosh"),
+            UiStyle::Win98 => "Windows 98",
+            UiStyle::WinXp => "Windows XP",
+            UiStyle::Nes => "Nintendo",
+            UiStyle::GameBoy => "Game Boy",
+            UiStyle::Ps1 => "PlayStation",
+            UiStyle::Ps2 => "PlayStation 2",
+        }
+    }
+
+    /// Styles that are light or dark by nature: `Some(true)` is always dark. The standard look
+    /// and the Macintosh follow the Appearance setting.
+    pub fn fixed_dark(self) -> Option<bool> {
+        match self {
+            UiStyle::Standard | UiStyle::Classic => None,
+            UiStyle::Ps2 => Some(true),
+            _ => Some(false),
+        }
+    }
+}
+
+/// Colors of the standard style: an accent and tinted backgrounds, each for light and dark.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Palette {
+    /// Blue on neutral gray — the look MacPilot always had.
+    Default,
+    Graphite,
+    Ocean,
+    Forest,
+    Sunset,
+    Rose,
+    Nord,
+    Dracula,
+    Solarized,
+    /// True black in the dark theme (for OLED screens).
+    Midnight,
+}
+
+impl Palette {
+    pub const ALL: [Palette; 10] = [
+        Palette::Default,
+        Palette::Graphite,
+        Palette::Ocean,
+        Palette::Forest,
+        Palette::Sunset,
+        Palette::Rose,
+        Palette::Nord,
+        Palette::Dracula,
+        Palette::Solarized,
+        Palette::Midnight,
+    ];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Palette::Default => "default",
+            Palette::Graphite => "graphite",
+            Palette::Ocean => "ocean",
+            Palette::Forest => "forest",
+            Palette::Sunset => "sunset",
+            Palette::Rose => "rose",
+            Palette::Nord => "nord",
+            Palette::Dracula => "dracula",
+            Palette::Solarized => "solarized",
+            Palette::Midnight => "midnight",
+        }
+    }
+
+    pub fn from_code(s: &str) -> Option<Palette> {
+        Palette::ALL.into_iter().find(|p| p.code() == s)
+    }
+
+    pub fn name(self) -> &'static str {
+        use crate::tr;
+        match self {
+            Palette::Default => "MacPilot",
+            Palette::Graphite => tr("Graphite"),
+            Palette::Ocean => tr("Ocean"),
+            Palette::Forest => tr("Forest"),
+            Palette::Sunset => tr("Sunset"),
+            Palette::Rose => tr("Rose"),
+            Palette::Nord => "Nord",
+            Palette::Dracula => "Dracula",
+            Palette::Solarized => "Solarized",
+            Palette::Midnight => tr("Midnight"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +151,7 @@ pub struct Settings {
     pub lang: Option<Lang>,
     pub theme: Theme,
     pub style: UiStyle,
+    pub palette: Palette,
     /// "Not used for" threshold of the Stale view, days.
     pub stale_days: i64,
     /// Build folders of projects untouched for this many days are recommended for removal.
@@ -57,6 +182,7 @@ impl Default for Settings {
             lang: None,
             theme: Theme::System,
             style: UiStyle::Standard,
+            palette: Palette::Default,
             stale_days: 180,
             junk_days: 30,
             dupes_min_mb: 1,
@@ -98,7 +224,8 @@ impl Settings {
                         _ => Theme::System,
                     }
                 }
-                "style" => s.style = if v == "classic" { UiStyle::Classic } else { UiStyle::Standard },
+                "style" => s.style = UiStyle::from_code(v).unwrap_or(UiStyle::Standard),
+                "palette" => s.palette = Palette::from_code(v).unwrap_or(Palette::Default),
                 "stale_days" => s.stale_days = v.parse().unwrap_or(s.stale_days),
                 "junk_days" => s.junk_days = v.parse().unwrap_or(s.junk_days),
                 "dupes_min_mb" => s.dupes_min_mb = v.parse().unwrap_or(s.dupes_min_mb),
@@ -125,9 +252,10 @@ impl Settings {
             Theme::Dark => "dark",
         };
         let text = format!(
-            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\nauto_clean_days = {}\nauto_clean_last = {}\nfile_access = {}\n{}",
+            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstyle = {}\npalette = {}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\nauto_clean_days = {}\nauto_clean_last = {}\nfile_access = {}\n{}",
             self.lang.map(|l| l.code()).unwrap_or("system"),
-            if self.style == UiStyle::Classic { "classic" } else { "standard" },
+            self.style.code(),
+            self.palette.code(),
             self.stale_days,
             self.junk_days,
             self.dupes_min_mb,
@@ -187,6 +315,17 @@ pub fn shorten(p: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_codes_round_trip() {
+        for p in Palette::ALL {
+            assert_eq!(Palette::from_code(p.code()), Some(p));
+        }
+        for st in UiStyle::ALL {
+            assert_eq!(UiStyle::from_code(st.code()), Some(st));
+        }
+        assert_eq!(Palette::from_code("no such theme"), None);
+    }
 
     #[test]
     fn excluded_folders_round_trip() {
