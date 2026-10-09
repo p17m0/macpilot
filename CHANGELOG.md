@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+- **Two iOS styles** (Settings → Style): **iOS 6** — the glossy blue-gray navigation bar with an engraved title, rounded white groups on blue-gray, shiny buttons, blue switches, Helvetica; and **iOS 7** — flat white with hairlines, big light headers, everything you can press in the tint color, outlined buttons and segments, green switches.
+- Fixed: *Check for updates* could fail with "403". MacPilot asked GitHub's API, which answers 403 after 60 anonymous requests an hour from one address (a shared or VPN address runs out quickly). It now reads the latest version from the release page itself, which has no such limit; the API is only a fallback.
+
 ## 0.8.0
 
 - **Color themes**: Settings → Colors offers ten palettes for the standard style — MacPilot (the blue it always had), Graphite, Ocean, Forest, Sunset, Rose, Nord, Dracula, Solarized and Midnight (true black in the dark theme). Each has a light and a dark variant and follows the Appearance setting; the accent, the backgrounds, the cards and the buttons all take the palette's tint.

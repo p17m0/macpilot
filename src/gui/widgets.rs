@@ -75,6 +75,9 @@ fn style_pal(style: UiStyle, palette: Palette, dark: bool) -> Pal {
             Pal { accent: c(48, 105, 200), panel: c(206, 206, 210), bar: c(186, 186, 192), card: c(226, 226, 230), track: c(160, 160, 168) }
         }
         UiStyle::Ps2 => Pal { accent: c(80, 140, 255), panel: c(3, 5, 18), bar: c(7, 10, 30), card: c(11, 17, 46), track: c(34, 50, 108) },
+        // The blue-gray of grouped tables, white groups.
+        UiStyle::Ios6 => Pal { accent: c(36, 104, 224), panel: c(206, 211, 219), bar: c(178, 187, 201), card: g(255), track: c(160, 166, 176) },
+        UiStyle::Ios7 => Pal { accent: c(0, 122, 255), panel: c(239, 239, 244), bar: c(247, 247, 247), card: g(255), track: c(206, 206, 211) },
         _ => pal(palette, dark),
     }
 }
@@ -105,6 +108,7 @@ pub fn rad(r: u8) -> u8 {
     match style() {
         UiStyle::Win98 | UiStyle::Nes | UiStyle::Ps2 => 0,
         UiStyle::WinXp => r.min(3),
+        UiStyle::Ios7 => r.min(5),
         _ => r,
     }
 }
@@ -183,6 +187,9 @@ impl C {
             UiStyle::Nes => Some([[0, 136, 0], [188, 124, 0], [216, 40, 0], [104, 68, 252]]),
             // Triangle, the logo's yellow, circle, square.
             UiStyle::Ps1 => Some([[0, 160, 132], [214, 150, 0], [226, 60, 76], [206, 104, 170]]),
+            UiStyle::Ios6 => Some([[58, 160, 40], [214, 138, 0], [200, 30, 30], [120, 80, 180]]),
+            // The system colors of iOS 7.
+            UiStyle::Ios7 => Some([[76, 217, 100], [255, 149, 0], [255, 59, 48], [88, 86, 214]]),
             _ => None,
         };
         let [r, g, b] = own.map_or(normal, |o| o[i]);
@@ -417,6 +424,11 @@ fn fonts(style: UiStyle) -> egui::FontDefinitions {
     // The retro styles put their own typeface in front: what the machine itself used, or the
     // nearest thing macOS ships (all of them have Cyrillic).
     let file = |name: &str, path: &str| system_font(path).map(|b| (name.to_string(), egui::FontData::from_static(b)));
+    // One face of Helvetica Neue (a collection: 0 regular, 1 bold, 7 light, 10 medium).
+    let neue = |index: u32| {
+        system_font("/System/Library/Fonts/HelveticaNeue.ttc")
+            .map(|b| (format!("helvetica-neue-{index}"), egui::FontData { index, ..egui::FontData::from_static(b) }))
+    };
     let pixel = |w: f32| Some((format!("pixel-{w}"), variant(PIXEL_FONT, &[(b"wght", w)])));
     let supplemental = "/System/Library/Fonts/Supplemental";
     for (family, list) in &mut front {
@@ -435,6 +447,11 @@ fn fonts(style: UiStyle) -> egui::FontDefinitions {
             // Windows XP set its title bars in Trebuchet.
             UiStyle::WinXp if display => file("trebuchet-bold", &format!("{supplemental}/Trebuchet MS Bold.ttf")),
             UiStyle::Win98 | UiStyle::WinXp => file("tahoma-bold", &format!("{supplemental}/Tahoma Bold.ttf")),
+            // iOS spoke Helvetica: bold in the glossy years, light from iOS 7 on.
+            UiStyle::Ios6 => neue(if body { 0 } else { 1 }),
+            UiStyle::Ios7 if body => neue(0),
+            UiStyle::Ios7 if display => neue(7),
+            UiStyle::Ios7 => neue(10),
             _ => None,
         };
         if let Some(f) = own {
@@ -599,6 +616,32 @@ pub fn setup_style(ctx: &egui::Context, style: UiStyle, palette: Palette) {
                             w.corner_radius = CornerRadius::same(13);
                         }
                     }
+                    UiStyle::Ios6 => {
+                        // Light gray buttons with a darker rim.
+                        all(v, Color32::from_rgb(238, 240, 243), Stroke::new(1.0, Color32::from_rgb(134, 141, 152)));
+                        v.widgets.hovered.weak_bg_fill = Color32::WHITE;
+                        v.widgets.hovered.bg_fill = Color32::WHITE;
+                        v.widgets.active.weak_bg_fill = Color32::from_rgb(204, 210, 220);
+                        v.widgets.active.bg_fill = Color32::from_rgb(204, 210, 220);
+                        v.faint_bg_color = Color32::from_rgb(196, 202, 211);
+                        v.window_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 18, spread: 0, color: Color32::from_black_alpha(110) };
+                    }
+                    UiStyle::Ios7 => {
+                        // No button shapes: what can be pressed is set in the tint color.
+                        all(v, Color32::TRANSPARENT, Stroke::NONE);
+                        // (Not the pressed state: egui takes the color of strong text from it.)
+                        for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.open] {
+                            w.fg_stroke.color = pl.accent;
+                        }
+                        v.widgets.active.fg_stroke.color = Color32::BLACK;
+                        v.widgets.hovered.weak_bg_fill = pl.accent.gamma_multiply(0.10);
+                        v.widgets.hovered.bg_fill = pl.accent.gamma_multiply(0.10);
+                        v.widgets.active.weak_bg_fill = pl.accent.gamma_multiply(0.22);
+                        v.widgets.active.bg_fill = pl.accent.gamma_multiply(0.22);
+                        v.widgets.open.weak_bg_fill = pl.accent.gamma_multiply(0.10);
+                        v.faint_bg_color = Color32::from_rgb(247, 247, 250);
+                        v.window_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 30, spread: 0, color: Color32::from_black_alpha(50) };
+                    }
                     UiStyle::Ps2 => {
                         // Blue glass with a glowing edge.
                         all(v, Color32::from_rgb(14, 24, 66), Stroke::new(1.0, Color32::from_rgb(52, 84, 190)));
@@ -760,7 +803,7 @@ pub fn header(ui: &mut Ui, title: &str, subtitle: &str) {
 
 /// Styles whose page title is a window title bar across the page.
 fn title_is_bar() -> bool {
-    matches!(style(), UiStyle::Classic | UiStyle::GameBoy | UiStyle::Win98 | UiStyle::WinXp | UiStyle::Nes)
+    matches!(style(), UiStyle::Classic | UiStyle::GameBoy | UiStyle::Win98 | UiStyle::WinXp | UiStyle::Nes | UiStyle::Ios6)
 }
 
 /// The page title next to the sections, for styles without a title bar; returns its width.
@@ -789,6 +832,8 @@ fn inline_title(ui: &mut Ui, title: &str) -> f32 {
             let t = RichText::new(title.to_uppercase()).size(ty::LARGE_TITLE - 4.0).extra_letter_spacing(5.0).color(Color32::from_rgb(140, 196, 255));
             ui.label(t).rect.width()
         }
+        // Big and light, as the headers of iOS 7.
+        UiStyle::Ios7 => ui.label(RichText::new(title).large_title().size(ty::LARGE_TITLE + 6.0)).rect.width(),
         _ => ui.label(RichText::new(title).large_title()).rect.width(),
     }
 }
@@ -905,6 +950,36 @@ fn title_text(ui: &mut Ui, title: &str) {
                 }
             }
         }
+        UiStyle::Ios6 => {
+            // The navigation bar: glossy blue-gray, the title engraved in white.
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), Sense::hover());
+            let p = ui.painter();
+            let mid = Pos2::new(rect.right(), rect.center().y);
+            gradient(p, Rect::from_min_max(rect.left_top(), mid), Color32::from_rgb(182, 194, 211), Color32::from_rgb(140, 158, 184), false);
+            gradient(
+                p,
+                Rect::from_min_max(Pos2::new(rect.left(), rect.center().y), rect.right_bottom()),
+                Color32::from_rgb(128, 148, 176),
+                Color32::from_rgb(108, 131, 162),
+                false,
+            );
+            p.line_segment(
+                [rect.left_top() + Vec2::new(0.0, 0.5), rect.right_top() + Vec2::new(0.0, 0.5)],
+                Stroke::new(1.0, Color32::from_rgb(214, 222, 234)),
+            );
+            p.line_segment(
+                [rect.left_bottom() - Vec2::new(0.0, 0.5), rect.right_bottom() - Vec2::new(0.0, 0.5)],
+                Stroke::new(1.0, Color32::from_rgb(45, 60, 84)),
+            );
+            p.text(
+                rect.center() - Vec2::new(0.0, 1.0),
+                egui::Align2::CENTER_CENTER,
+                title,
+                display(ty::TITLE),
+                Color32::from_rgba_unmultiplied(30, 44, 68, 190),
+            );
+            p.text(rect.center(), egui::Align2::CENTER_CENTER, title, display(ty::TITLE), Color32::WHITE);
+        }
         UiStyle::Nes => {
             // The dark band of the console's front, with its red lettering and two red stripes.
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::hover());
@@ -948,6 +1023,13 @@ pub fn card_frame(ui: &Ui) -> egui::Frame {
                 f.stroke(Stroke::new(2.0, Color32::from_gray(38))).corner_radius(CornerRadius::ZERO).shadow(hard(4, Color32::from_black_alpha(70)))
             }
             UiStyle::Ps1 => f.stroke(Stroke::new(1.0, C::track(ui))).corner_radius(CornerRadius::same(16)),
+            // A group of a grouped table: white, rounded, a gray rim and a light line under it.
+            UiStyle::Ios6 => f
+                .stroke(Stroke::new(1.0, Color32::from_rgb(150, 156, 166)))
+                .corner_radius(CornerRadius::same(10))
+                .shadow(hard(1, Color32::from_white_alpha(150))),
+            // Flat, hairlines only.
+            UiStyle::Ios7 => f.stroke(Stroke::new(0.5, C::track(ui))).corner_radius(CornerRadius::ZERO),
             UiStyle::Ps2 => f
                 .stroke(Stroke::new(1.0, Color32::from_rgb(52, 84, 190)))
                 .corner_radius(CornerRadius::ZERO)
@@ -1242,9 +1324,17 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
         C::track(ui)
     };
     let frame = egui::Frame::new().fill(track).corner_radius(if classic { 0 } else { rad(8) }).inner_margin(egui::Margin::same(2));
-    let frame = if classic { frame.stroke(Stroke::new(1.0, C::fg())) } else { frame };
+    let ios7 = style() == UiStyle::Ios7;
+    let frame = if classic {
+        frame.stroke(Stroke::new(1.0, C::fg()))
+    } else if ios7 {
+        // Outlined in the tint; the chosen segment is filled with it.
+        frame.fill(Color32::TRANSPARENT).stroke(Stroke::new(1.0, C::accent())).inner_margin(egui::Margin::same(1))
+    } else {
+        frame
+    };
     frame.show(ui, |ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().item_spacing.x = if ios7 { 0.0 } else { 2.0 };
         // Inside a right-aligned row egui lays items out from the right: add them reversed,
         // so the options always read in the given order.
         let rtl = ui.layout().prefer_right_to_left();
@@ -1256,6 +1346,8 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T,
                     (true, true) => (C::fg(), C::paper()),
                     (true, false) => (C::paper(), C::fg()),
                     // Windows 98: a row of buttons, the chosen one pressed in.
+                    (false, true) if ios7 => (C::accent(), Color32::WHITE),
+                    (false, false) if ios7 => (Color32::TRANSPARENT, C::accent()),
                     (false, true) if win98 => (Color32::from_gray(224), Color32::BLACK),
                     (false, false) if win98 => (Color32::from_gray(192), Color32::BLACK),
                     (false, true) => (C::card(ui), C::text(ui)),
@@ -1320,12 +1412,24 @@ pub fn switch(ui: &mut Ui, on: &mut bool, label: &str) -> egui::Response {
         return resp;
     }
     let t = ui.ctx().animate_bool_responsive(resp.id, *on);
-    let bg = if *on { C::green() } else { C::track(ui) };
-    let (round, knob) = (rad(11), rad(9));
+    // Blue in the glossy years, green since iOS 7.
+    let ios = matches!(style(), UiStyle::Ios6 | UiStyle::Ios7);
+    let bg = match (*on, style()) {
+        (true, UiStyle::Ios6) => Color32::from_rgb(0, 127, 234),
+        (true, _) => C::green(),
+        (false, _) if ios => Color32::from_rgb(229, 229, 234),
+        (false, _) => C::track(ui),
+    };
+    let (round, knob) = if ios { (11, 9) } else { (rad(11), rad(9)) };
     p.rect_filled(rect, round, bg);
     let x = egui::lerp((rect.left() + 11.0)..=(rect.right() - 11.0), t);
     // A square knob in the boxy styles.
-    p.rect_filled(Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0)), knob, Color32::WHITE);
+    let knob_rect = Rect::from_center_size(Pos2::new(x, rect.center().y), Vec2::splat(18.0));
+    p.rect_filled(knob_rect, knob, Color32::WHITE);
+    if ios {
+        p.rect_stroke(rect, round, Stroke::new(1.0, Color32::from_black_alpha(40)), egui::StrokeKind::Inside);
+        p.rect_stroke(knob_rect, knob, Stroke::new(1.0, Color32::from_black_alpha(60)), egui::StrokeKind::Outside);
+    }
     resp
 }
 
@@ -1638,6 +1742,12 @@ pub fn big_button(ui: &mut Ui, text: &str, color: Color32, enabled: bool) -> egu
             egui::Button::new(label.color(Color32::WHITE)).fill(fill).corner_radius(3).stroke(Stroke::new(1.0, mix(fill, Color32::BLACK, 0.35)))
         }
         UiStyle::Nes => egui::Button::new(label.color(Color32::WHITE)).fill(color).corner_radius(0).stroke(Stroke::new(2.0, Color32::from_gray(38))),
+        // A glossy button (the shine is painted on top, below).
+        UiStyle::Ios6 => {
+            egui::Button::new(label.color(Color32::WHITE)).fill(color).corner_radius(8).stroke(Stroke::new(1.0, mix(color, Color32::BLACK, 0.45)))
+        }
+        // Outlined in its color, like the buttons of the App Store.
+        UiStyle::Ios7 => egui::Button::new(label.color(color)).fill(Color32::TRANSPARENT).corner_radius(5).stroke(Stroke::new(1.0, color)),
         UiStyle::Ps2 => egui::Button::new(label.color(Color32::WHITE))
             .fill(color.gamma_multiply(0.55))
             .corner_radius(0)
@@ -1649,6 +1759,11 @@ pub fn big_button(ui: &mut Ui, text: &str, color: Color32, enabled: bool) -> egu
     if style() == UiStyle::Win98 && enabled {
         ui.painter().rect_stroke(r.rect.expand(1.0), 0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Outside);
     }
+    if style() == UiStyle::Ios6 && ui.is_rect_visible(r.rect) {
+        // The shine of the upper half.
+        let top = Rect::from_min_max(r.rect.left_top() + Vec2::new(3.0, 1.5), Pos2::new(r.rect.right() - 3.0, r.rect.center().y));
+        gradient(ui.painter(), top, Color32::from_white_alpha(95), Color32::from_white_alpha(30), false);
+    }
     r
 }
 
@@ -1659,9 +1774,11 @@ pub fn tinted_button(ui: &mut Ui, text: &str, color: Color32, enabled: bool) -> 
     let b = match style() {
         UiStyle::Classic | UiStyle::GameBoy => egui::Button::new(RichText::new(text).semibold()).corner_radius(button_radius()),
         // The usual button of the system, with the text in the color.
-        UiStyle::Win98 | UiStyle::WinXp | UiStyle::Nes => {
+        UiStyle::Win98 | UiStyle::WinXp | UiStyle::Nes | UiStyle::Ios6 => {
             egui::Button::new(RichText::new(text).semibold().color(color)).corner_radius(button_radius())
         }
+        // Just the word, in its color.
+        UiStyle::Ios7 => egui::Button::new(RichText::new(text).color(color)).fill(Color32::TRANSPARENT).stroke(Stroke::NONE).corner_radius(5),
         _ => egui::Button::new(RichText::new(text).semibold().color(color))
             .fill(color.gamma_multiply(0.14))
             .stroke(Stroke::NONE)

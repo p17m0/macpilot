@@ -31,11 +31,25 @@ pub enum UiStyle {
     Ps1,
     /// The dark blue glow of the PlayStation 2 browser.
     Ps2,
+    /// iOS 6 and before: glossy bars, pinstriped gray, rounded white groups.
+    Ios6,
+    /// iOS 7: flat white, thin type, the tint color for everything you can press.
+    Ios7,
 }
 
 impl UiStyle {
-    pub const ALL: [UiStyle; 8] =
-        [UiStyle::Standard, UiStyle::Classic, UiStyle::Win98, UiStyle::WinXp, UiStyle::Nes, UiStyle::GameBoy, UiStyle::Ps1, UiStyle::Ps2];
+    pub const ALL: [UiStyle; 10] = [
+        UiStyle::Standard,
+        UiStyle::Classic,
+        UiStyle::Win98,
+        UiStyle::WinXp,
+        UiStyle::Nes,
+        UiStyle::GameBoy,
+        UiStyle::Ps1,
+        UiStyle::Ps2,
+        UiStyle::Ios6,
+        UiStyle::Ios7,
+    ];
 
     pub fn code(self) -> &'static str {
         match self {
@@ -47,6 +61,8 @@ impl UiStyle {
             UiStyle::GameBoy => "gameboy",
             UiStyle::Ps1 => "ps1",
             UiStyle::Ps2 => "ps2",
+            UiStyle::Ios6 => "ios6",
+            UiStyle::Ios7 => "ios7",
         }
     }
 
@@ -64,6 +80,8 @@ impl UiStyle {
             UiStyle::GameBoy => "Game Boy",
             UiStyle::Ps1 => "PlayStation",
             UiStyle::Ps2 => "PlayStation 2",
+            UiStyle::Ios6 => "iOS 6",
+            UiStyle::Ios7 => "iOS 7",
         }
     }
 

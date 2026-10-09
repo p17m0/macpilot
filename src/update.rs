@@ -26,19 +26,41 @@ pub struct Release {
     pub tag: String,
 }
 
+/// The tag in the address GitHub's "latest release" link leads to (`…/releases/tag/v0.2.0`).
+fn tag_from_redirect(url: &str) -> Option<String> {
+    let tag = url.trim().rsplit_once("/releases/tag/")?.1.split(['?', '#', '/']).next()?;
+    (!tag.is_empty()).then(|| tag.to_string())
+}
+
+/// The tag of the latest release. Asked from the website first — `releases/latest` redirects to
+/// the release — because the API allows only 60 anonymous requests an hour per address and
+/// answers 403 after that (a shared office or VPN address runs out quickly). The API is the fallback.
+fn latest_tag(repo: &str) -> Result<String, String> {
+    let curl = |args: &[&str], url: String| -> Result<String, String> {
+        let out =
+            std::process::Command::new("/usr/bin/curl").args(["-fsS", "--max-time", "15"]).args(args).arg(url).output().map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).to_string())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    };
+    let site = curl(&["-o", "/dev/null", "-w", "%{redirect_url}"], format!("https://github.com/{repo}/releases/latest"));
+    if let Some(tag) = site.as_ref().ok().and_then(|u| tag_from_redirect(u)) {
+        return Ok(tag);
+    }
+    let api = curl(&["-L", "-H", "Accept: application/vnd.github+json"], format!("https://api.github.com/repos/{repo}/releases/latest"));
+    match api {
+        Ok(body) => json_string(&body, "tag_name").ok_or_else(|| "unexpected answer from GitHub".to_string()),
+        // The website's own error says more, when there was one.
+        Err(e) => Err(site.err().filter(|s| !s.is_empty()).unwrap_or(e)),
+    }
+}
+
 /// The latest release if it is newer than this build; `Ok(None)` when up to date.
 pub fn check() -> Result<Option<Release>, String> {
     let repo = repo().ok_or("this build does not know its GitHub repository")?;
-    let out = std::process::Command::new("/usr/bin/curl")
-        .args(["-fsSL", "--max-time", "15", "-H", "Accept: application/vnd.github+json"])
-        .arg(format!("https://api.github.com/repos/{repo}/releases/latest"))
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-    let body = String::from_utf8_lossy(&out.stdout);
-    let tag = json_string(&body, "tag_name").ok_or("unexpected answer from GitHub")?;
+    let tag = latest_tag(repo)?;
     let version = tag.trim_start_matches('v').to_string();
     Ok(newer(&version, env!("CARGO_PKG_VERSION")).then(|| Release { url: format!("https://github.com/{repo}/releases/tag/{tag}"), version, tag }))
 }
@@ -175,6 +197,15 @@ mod tests {
         let j = r#"{"url": "x", "html_url": "https://github.com/a/b/releases/tag/v0.2.0", "tag_name" : "v0.2.0", "name": "MacPilot 0.2.0"}"#;
         assert_eq!(json_string(j, "tag_name").as_deref(), Some("v0.2.0"));
         assert_eq!(json_string(j, "missing"), None);
+    }
+
+    #[test]
+    fn reads_the_tag_of_the_latest_release_link() {
+        assert_eq!(tag_from_redirect("https://github.com/a/b/releases/tag/v0.8.0\n").as_deref(), Some("v0.8.0"));
+        assert_eq!(tag_from_redirect("https://github.com/a/b/releases/tag/v1.0.0-beta?x=1").as_deref(), Some("v1.0.0-beta"));
+        // No release yet: the link leads to the list of releases.
+        assert_eq!(tag_from_redirect("https://github.com/a/b/releases"), None);
+        assert_eq!(tag_from_redirect(""), None);
     }
 
     #[test]
