@@ -1,6 +1,7 @@
 //! MacPilot core: processes, disk analysis, cleanup, apps and startup items.
 //! Shared by the window app (`macpilot-gui`) and the terminal app (`macpilot`).
 
+pub mod actionlog;
 pub mod apps;
 pub mod appupdates;
 pub mod battery;

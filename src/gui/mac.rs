@@ -25,6 +25,12 @@ define_class!(
             show_window();
         }
 
+        #[unsafe(method(quickClean:))]
+        fn quick_clean(&self, _sender: Option<&AnyObject>) {
+            QUICK_CLEAN.store(true, std::sync::atomic::Ordering::Relaxed);
+            show_window();
+        }
+
         #[unsafe(method(quitApp:))]
         fn quit_app(&self, _sender: Option<&AnyObject>) {
             if let Some(mtm) = MainThreadMarker::new() {
@@ -34,10 +40,19 @@ define_class!(
     }
 );
 
+/// "Quick cleanup…" was chosen in the menu bar menu.
+static QUICK_CLEAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether "Quick cleanup…" was chosen in the menu bar menu since the last call.
+pub fn take_quick_clean() -> bool {
+    QUICK_CLEAN.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 struct StatusMenu {
     item: Retained<NSStatusItem>,
     /// Read-only lines at the top of the menu (CPU, memory, disk…).
     lines: Vec<Retained<NSMenuItem>>,
+    clean: Retained<NSMenuItem>,
     open: Retained<NSMenuItem>,
     quit: Retained<NSMenuItem>,
     _target: Retained<MenuTarget>,
@@ -63,6 +78,7 @@ pub struct StatusInfo<'a> {
     /// Shown on hover, so it is clear the item belongs to MacPilot.
     pub tooltip: &'a str,
     pub lines: &'a [String],
+    pub clean_label: &'a str,
     pub open_label: &'a str,
     pub quit_label: &'a str,
 }
@@ -96,9 +112,10 @@ pub fn set_status(info: Option<StatusInfo>) {
                 lines.push(l);
             }
             menu.addItem(&NSMenuItem::separatorItem(mtm));
+            let clean = menu_item(mtm, info.clean_label, Some(sel!(quickClean:)), "");
             let open = menu_item(mtm, info.open_label, Some(sel!(openWindow:)), "");
             let quit = menu_item(mtm, info.quit_label, Some(sel!(quitApp:)), "q");
-            for i in [&open, &quit] {
+            for i in [&clean, &open, &quit] {
                 unsafe { i.setTarget(Some(&target)) };
                 menu.addItem(i);
             }
@@ -115,7 +132,7 @@ pub fn set_status(info: Option<StatusInfo>) {
                     b.setImagePosition(NSCellImagePosition::ImageLeading);
                 }
             }
-            *cur = Some(StatusMenu { item, lines, open, quit, _target: target, title: String::new() });
+            *cur = Some(StatusMenu { item, lines, clean, open, quit, _target: target, title: String::new() });
         }
         let s = cur.as_mut().expect("status menu");
         if s.title != info.title {
@@ -130,6 +147,7 @@ pub fn set_status(info: Option<StatusInfo>) {
         for (item, text) in s.lines.iter().zip(info.lines) {
             item.setTitle(&ns(text));
         }
+        s.clean.setTitle(&ns(info.clean_label));
         s.open.setTitle(&ns(info.open_label));
         s.quit.setTitle(&ns(info.quit_label));
     });

@@ -6,6 +6,7 @@ mod autostart;
 mod battery_view;
 mod clean_view;
 mod disk_view;
+mod history_view;
 mod icons;
 mod mac;
 mod overview;
@@ -21,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText};
+use macpilot::actionlog::Kind;
 use macpilot::apps::{AppInfo, Orphan};
 use macpilot::clean::{self, Target};
 use macpilot::devjunk::Junk;
@@ -42,6 +44,7 @@ pub enum Page {
     Clean,
     Apps,
     Startup,
+    History,
     Settings,
 }
 
@@ -176,7 +179,8 @@ pub enum Msg {
     Orphans(Vec<Orphan>),
     Leftovers(PathBuf, Vec<(PathBuf, u64)>),
     Startup(Vec<StartupItem>),
-    StartupChanged(Result<(), String>),
+    /// The item's label, whether it was turned on, and how it went.
+    StartupChanged(String, bool, Result<(), String>),
     TrashEmptied(Result<(), String>),
     Update(Result<Option<macpilot::update::Release>, String>),
     /// The new version is downloaded and checked (the path of the new app), or why not.
@@ -234,6 +238,9 @@ pub struct Gui {
     pub sensors: Arc<Mutex<Option<macpilot::sensors::Sensors>>>,
     /// Journal of what went to the Trash through MacPilot.
     pub trash_log: Vec<macpilot::trashlog::Entry>,
+    /// Journal of everything MacPilot did (the History page).
+    pub actions: Vec<macpilot::actionlog::Entry>,
+    pub history_filter: history_view::Filter,
     /// The new version is being downloaded.
     pub update_installing: bool,
     auto_clean_running: bool,
@@ -517,6 +524,8 @@ impl Gui {
             net,
             sensors,
             trash_log: macpilot::trashlog::load(),
+            actions: macpilot::actionlog::load(),
+            history_filter: history_view::Filter::All,
             update_installing: false,
             auto_clean_running: false,
             auto_preview: None,
@@ -611,6 +620,10 @@ impl Gui {
             Ok("light") => apply_theme(&self.ctx, Theme::Light),
             _ => {}
         }
+        // MACPILOT_FAKE_UPDATE=9.9.9 (developer screenshots): look as if that version were out.
+        if let Some(v) = std::env::var("MACPILOT_FAKE_UPDATE").ok().filter(|_| cfg!(feature = "dev-tools")) {
+            self.update = Some(macpilot::update::Release { url: String::new(), tag: format!("v{v}"), version: v });
+        }
         let Ok(page) = std::env::var("MACPILOT_PAGE") else { return };
         let page = page.trim_end_matches(":check");
         let (page, sub) = page.split_once(':').unwrap_or((page, ""));
@@ -621,6 +634,7 @@ impl Gui {
             "clean" => Page::Clean,
             "apps" => Page::Apps,
             "startup" => Page::Startup,
+            "activity" => Page::History,
             "settings" => Page::Settings,
             "privacy" => {
                 self.settings_tab = settings_view::SettingsTab::Privacy;
@@ -796,6 +810,8 @@ impl Gui {
             Msg::Update(r) => {
                 self.update_checking = false;
                 match r {
+                    // MACPILOT_FAKE_UPDATE (developer screenshots) keeps its made-up version.
+                    Ok(_) if cfg!(feature = "dev-tools") && std::env::var("MACPILOT_FAKE_UPDATE").is_ok() => {}
                     Ok(u) => {
                         self.update = u;
                         self.update_error = None;
@@ -830,9 +846,12 @@ impl Gui {
                 self.leftovers.insert(app, l);
             }
             Msg::Startup(s) => self.startup = Some(s),
-            Msg::StartupChanged(r) => {
+            Msg::StartupChanged(label, on, r) => {
                 match r {
-                    Ok(()) => self.toast(tr("Startup item updated."), Level::Ok),
+                    Ok(()) => {
+                        self.log(if on { Kind::StartupOn } else { Kind::StartupOff }, 0, 0, label);
+                        self.toast(tr("Startup item updated."), Level::Ok)
+                    }
                     Err(e) => self.toast(trf("Could not change the startup item: {0}", &[&e]), Level::Danger),
                 }
                 self.reload_startup();
@@ -841,6 +860,8 @@ impl Gui {
                 match r {
                     Ok(()) => {
                         macpilot::trashlog::mark_emptied(&mut self.trash_log);
+                        let size = self.targets.iter().find(|t| t.id == "trash").and_then(|t| t.stat).map_or(0, |s| s.size);
+                        self.log(Kind::EmptyTrash, 0, size, "");
                         self.toast(tr("The Trash is empty."), Level::Ok)
                     }
                     Err(e) => self.toast(trf("Could not empty the Trash: {0}", &[&e]), Level::Danger),
@@ -856,6 +877,8 @@ impl Gui {
                         }
                     }
                     let n = pids.len();
+                    let names: Vec<String> = pids.iter().map(|p| self.snap.get(*p).map_or_else(|| format!("PID {p}"), |x| x.name.clone())).collect();
+                    self.log(if sig == libc::SIGKILL { Kind::ForceQuit } else { Kind::Quit }, n as u64, 0, macpilot::actionlog::names(&names));
                     let msg = if sig == libc::SIGKILL {
                         trf("Force quit: {0}.", &[&fmt::n(n as u64, fmt::Noun::Process)])
                     } else {
@@ -876,7 +899,7 @@ impl Gui {
                     }
                     Err(e) => self.toast(trf("Some items could not be moved to the Trash: {0}", &[&e]), Level::Danger),
                 }
-                self.journal(&paths, size);
+                self.journal(&paths, size, Kind::Trash);
                 self.after_trash(&paths);
             }
             Msg::AutoCleaned { paths, size, result } => {
@@ -888,7 +911,7 @@ impl Gui {
                         mac::notify("clean:auto", tr("Scheduled cleanup done."), &text);
                     }
                 }
-                self.journal(&paths, size);
+                self.journal(&paths, size, Kind::AutoClean);
                 self.after_trash(&paths);
             }
             Msg::AutoPreview(n, size) => {
@@ -897,7 +920,10 @@ impl Gui {
             }
             Msg::SnapshotsDeleted(r) => {
                 match r {
-                    Ok(n) => self.toast(trf("Snapshots deleted: {0}", &[&n]), Level::Ok),
+                    Ok(n) => {
+                        self.log(Kind::Snapshots, n as u64, 0, "");
+                        self.toast(trf("Snapshots deleted: {0}", &[&n]), Level::Ok)
+                    }
                     // Empty: the password dialog was cancelled.
                     Err(e) if e.is_empty() => {}
                     Err(e) => self.toast(trf("Could not delete the snapshots: {0}", &[&e]), Level::Danger),
@@ -913,6 +939,7 @@ impl Gui {
                 use macpilot::appupdates::Source;
                 match (result, &update.source) {
                     (Ok(()), Source::Homebrew { .. }) => {
+                        self.log(Kind::AppUpdate, 0, 0, format!("{} {}", update.name, update.latest));
                         self.toast(trf("{0} is updated to {1}.", &[&update.name, &update.latest]), Level::Ok);
                         if let Some(r) = &mut self.app_updates {
                             r.updates.retain(|u| u.app != update.app);
@@ -936,6 +963,7 @@ impl Gui {
                 match result {
                     Ok(()) => {
                         macpilot::trashlog::mark_restored(&mut self.trash_log, &path, at);
+                        self.log(Kind::PutBack, 1, 0, fmt::path(&path));
                         self.toast(trf("Put back: {0}", &[&fmt::path(&path)]), Level::Ok);
                         self.reload_dir();
                     }
@@ -958,7 +986,7 @@ impl Gui {
     }
 
     /// Write what really left its place into the journal (see the History tab of Cleanup).
-    fn journal(&mut self, paths: &[PathBuf], total: u64) {
+    fn journal(&mut self, paths: &[PathBuf], total: u64, kind: Kind) {
         let gone: Vec<(PathBuf, u64)> = paths
             .iter()
             .filter(|p| std::fs::symlink_metadata(p).is_err())
@@ -968,8 +996,29 @@ impl Gui {
             })
             .collect();
         if !gone.is_empty() {
+            let what = match gone.as_slice() {
+                [one] => fmt::path(&one.0),
+                all => macpilot::actionlog::names(&all.iter().map(|g| g.0.file_name().unwrap_or_default().to_string_lossy()).collect::<Vec<_>>()),
+            };
+            self.log(kind, gone.len() as u64, total, what);
             macpilot::trashlog::record(&mut self.trash_log, gone, disk::now_unix());
         }
+    }
+
+    /// Write an action into the journal of the History page.
+    pub fn log(&mut self, kind: Kind, count: u64, size: u64, what: impl Into<String>) {
+        let entry = macpilot::actionlog::Entry { at: disk::now_unix(), kind, count, size, what: what.into() };
+        macpilot::actionlog::record(&mut self.actions, entry);
+    }
+
+    /// Clean everything ticked on the Cleanup page (the safe places, unless changed there),
+    /// from anywhere: one confirmation, no list to go through.
+    pub fn quick_clean(&mut self) {
+        if !self.settings.file_access {
+            self.go_page(Page::Clean);
+            return;
+        }
+        clean_view::quick_clean(self);
     }
 
     /// Put an item of the journal back where it was.
@@ -1294,6 +1343,7 @@ impl Gui {
             Action::QuitApp { app, main_pid } => {
                 procs::quit_app(&app);
                 let name = procs::bundle_name(&app);
+                self.log(Kind::QuitApp, 1, 0, name.clone());
                 if let Some(p) = main_pid {
                     self.pending.push((p, name.clone(), Instant::now()));
                 }
@@ -1321,7 +1371,7 @@ impl Gui {
             }
             Action::Startup { item, on } => {
                 std::thread::spawn(move || {
-                    let _ = tx.send(Msg::StartupChanged(macpilot::startup::set_enabled(&item, on)));
+                    let _ = tx.send(Msg::StartupChanged(item.label.clone(), on, macpilot::startup::set_enabled(&item, on)));
                     ctx.request_repaint();
                 });
             }
@@ -1613,6 +1663,7 @@ impl Gui {
             title: &title,
             tooltip: tr("MacPilot — CPU and memory use"),
             lines: &lines,
+            clean_label: tr("Quick cleanup…"),
             open_label: tr("Open MacPilot"),
             quit_label: tr("Quit MacPilot"),
         }));
@@ -1825,12 +1876,23 @@ impl eframe::App for Gui {
             mac::hide_window();
         }
 
-        // ⌘1…⌘8 switch pages (in sidebar order), ⌘F searches processes, ⌘, opens settings.
+        // ⌘1…⌘9 switch pages (in sidebar order), ⌘F searches processes, ⌘, opens settings,
+        // ⇧⌘K is the quick cleanup.
         let pages: Vec<Page> = self.nav_items().into_iter().map(|(p, _, _)| p).collect();
-        let keys =
-            [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8];
+        let keys = [
+            egui::Key::Num1,
+            egui::Key::Num2,
+            egui::Key::Num3,
+            egui::Key::Num4,
+            egui::Key::Num5,
+            egui::Key::Num6,
+            egui::Key::Num7,
+            egui::Key::Num8,
+            egui::Key::Num9,
+        ];
         let mut go = None;
         let mut search = false;
+        let mut quick = false;
         ctx.input(|i| {
             if i.modifiers.command {
                 for (k, p) in keys.iter().zip(pages) {
@@ -1845,8 +1907,12 @@ impl eframe::App for Gui {
                     go = Some(Page::Procs);
                     search = true;
                 }
+                quick = i.modifiers.shift && i.key_pressed(egui::Key::K);
             }
         });
+        if (quick || mac::take_quick_clean()) && self.confirm.is_none() {
+            self.quick_clean();
+        }
         if let Some(p) = go {
             self.go_page(p);
             self.focus_search |= search;
@@ -1870,6 +1936,7 @@ impl eframe::App for Gui {
             Page::Clean => clean_view::show(self, ui),
             Page::Apps => apps_view::show(self, ui),
             Page::Startup => startup_view::show(self, ui),
+            Page::History => history_view::show(self, ui),
             Page::Settings => settings_view::show(self, ui),
         }
 
@@ -1890,6 +1957,7 @@ impl Gui {
             (Page::Clean, widgets::Icon::Clean, tr("Cleanup")),
             (Page::Apps, widgets::Icon::Apps, tr("Apps")),
             (Page::Startup, widgets::Icon::Startup, tr("Startup")),
+            (Page::History, widgets::Icon::History, tr("Activity")),
             (Page::Settings, widgets::Icon::Settings, tr("Settings")),
         ]);
         v
@@ -1952,6 +2020,7 @@ impl Gui {
                             Page::Clean => tr("Cleanup moves items to the Trash — everything can be restored."),
                             Page::Apps => tr("Uninstall removes the app and the files it left in your Library."),
                             Page::Startup => tr("Disabling is reversible: the item is kept and can be turned back on."),
+                            Page::History => tr("The history is kept on this Mac only."),
                             Page::Settings => tr("Settings are saved automatically."),
                         };
                         ui.label(RichText::new(hint).color(C::dim(ui)));

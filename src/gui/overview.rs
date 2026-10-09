@@ -280,12 +280,9 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
         out.push(Rec {
             color: C::accent(),
             title: trf("{0} of caches and logs", &[&fmt::bytes(caches)]),
-            text: tr("Apps recreate them when needed. Safe to clean.").into(),
-            button: tr("Clean up"),
-            go: Box::new(|g| {
-                g.clean_mode = CleanMode::System;
-                g.go_page(Page::Clean);
-            }),
+            text: tr("Apps recreate them when needed. Quick cleanup moves the safe ones to the Trash at once (⇧⌘K).").into(),
+            button: tr("Quick cleanup…"),
+            go: Box::new(|g| g.quick_clean()),
         });
     }
 
@@ -467,6 +464,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                 });
 
                 ui.add_space(w::sp::L);
+                let mut quick = false;
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr("Recommendations")).section());
                     let scanning = g.scan.as_ref().is_some_and(|s| !s.done()) || g.rescan.is_some();
@@ -474,7 +472,19 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         ui.spinner();
                         ui.label(RichText::new(tr("checking your Mac…")).color(C::dim(ui)));
                     }
+                    // Always in the same place, whatever the recommendations are.
+                    let size = if g.settings.file_access { crate::clean_view::quick_size(g) } else { 0 };
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let label = format!("{} · {}", tr("Quick cleanup…").trim_end_matches('…'), fmt::bytes(size));
+                        let hint = tr("Moves the safe junk to the Trash after one confirmation. ⇧⌘K from any page.");
+                        if w::tinted_button(ui, &label, C::accent(), size > 0).on_hover_text(hint).clicked() {
+                            quick = true;
+                        }
+                    });
                 });
+                if quick {
+                    g.quick_clean();
+                }
                 ui.add_space(w::sp::S);
                 let recs = recommendations(g);
                 if recs.is_empty() {

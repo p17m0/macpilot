@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.5
+
+- **Quick cleanup**: one confirmation moves everything ticked in Cleanup (the safe places, unless you changed that) to the Trash, without opening the list — the button next to *Recommendations* on the Overview, *Quick cleanup…* in the menu bar menu, or ⇧⌘K on any page.
+- **History** (a new page): what MacPilot did on this Mac in the last 90 days — moved to the Trash, emptied the Trash, put back, stopped, paused or force quit a process, quit an app, switched a startup item, deleted snapshots, updated an app. Filter by kind; *Put things back…* opens the Trash journal. Kept in `~/Library/Application Support/MacPilot/actions.tsv`, never sent anywhere.
+- Fixed: in Settings the text of a row wrapped far from its controls, and the *new version* box ran its text under the buttons. Rows now give the text all the room the controls leave; the new version is the first row of the updates box.
+
 ## 0.7.4
 
 - **Cleanup in one click**: System junk is one list instead of a wall of cards. The safe places are ticked from the start, *Clean selected* moves them all to the Trash after a single confirmation, and the Trash with *Empty Trash…* stays in sight at the top. A click on a row ticks it; the right-click menu cleans one place, opens it or shows it in Finder.

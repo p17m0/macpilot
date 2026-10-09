@@ -545,6 +545,7 @@ pub enum Icon {
     Clean,
     Apps,
     Startup,
+    History,
     Settings,
 }
 
@@ -655,6 +656,18 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32, filled: bo
                 p.add(egui::Shape::line(arc(c0, 6.0 * u, -PI / 2.0 + 0.6, -PI / 2.0 + TAU - 0.6), s));
                 p.line_segment([at(8.0, 1.0), at(8.0, 8.0)], s);
             }
+        }
+        Icon::History => {
+            // A clock.
+            let paper = C::paper_on(c);
+            if filled {
+                p.circle_filled(m, 7.0 * u, c);
+            } else {
+                p.circle_stroke(m, 6.3 * u, s);
+            }
+            let hands = Stroke::new(1.5 * u, if filled { paper } else { c });
+            p.line_segment([m, at(8.0, 4.4)], hands);
+            p.line_segment([m, at(10.8, 9.6)], hands);
         }
         Icon::Settings => {
             // A gear: eight teeth around a ring.

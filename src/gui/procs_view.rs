@@ -657,7 +657,10 @@ fn action_buttons(g: &mut Gui, ui: &mut Ui, safety: Safety, is_app: bool, single
             if r.clicked() {
                 let sig = if p.stopped { libc::SIGCONT } else { libc::SIGSTOP };
                 match procs::send_signal(p.pid, sig) {
-                    Ok(()) => g.toast(if p.stopped { trf("“{0}” resumed", &[&p.name]) } else { trf("“{0}” paused", &[&p.name]) }, Level::Ok),
+                    Ok(()) => {
+                        g.log(if p.stopped { macpilot::actionlog::Kind::Resume } else { macpilot::actionlog::Kind::Pause }, 1, 0, p.name.clone());
+                        g.toast(if p.stopped { trf("“{0}” resumed", &[&p.name]) } else { trf("“{0}” paused", &[&p.name]) }, Level::Ok)
+                    }
                     Err(e) => g.toast(trf("Failed: {0}", &[&e]), Level::Danger),
                 }
             }

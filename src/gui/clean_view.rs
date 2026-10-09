@@ -150,7 +150,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let label = trf("Clean selected · {0}", &[&fmt::bytes(selected_size)]);
-            if w::big_button(ui, &label, C::accent(), !selected.is_empty()).clicked() {
+            if w::big_button(ui, &label, C::accent(), !selected.is_empty()).on_hover_text(tr("⇧⌘K from any page")).clicked() {
                 clean_now = Some(selected.clone());
             }
             if w::plain_button(ui, tr("⟳ Measure again")).clicked() {
@@ -288,6 +288,32 @@ fn system(g: &mut Gui, ui: &mut Ui) {
     if let Some(which) = clean_now {
         ask_clean(g, &which);
     }
+}
+
+/// What the quick cleanup takes: everything ticked in the list that has something in it.
+fn quick_targets(g: &Gui) -> Vec<usize> {
+    (0..g.targets.len())
+        .filter(|i| {
+            let t = &g.targets[*i];
+            t.cleanable() && g.clean_checked.contains(t.id) && t.stat.is_some_and(|s| s.size > 0)
+        })
+        .collect()
+}
+
+/// How much the quick cleanup would move to the Trash right now.
+pub fn quick_size(g: &Gui) -> u64 {
+    quick_targets(g).iter().filter_map(|i| g.targets[*i].stat).map(|s| s.size).sum()
+}
+
+/// Everything ticked in the list, cleaned from anywhere (Overview, the menu bar, ⇧⌘K) after one
+/// confirmation.
+pub fn quick_clean(g: &mut Gui) {
+    let which = quick_targets(g);
+    if which.is_empty() {
+        g.toast(tr("Nothing to clean up right now."), Level::Info);
+        return;
+    }
+    ask_clean(g, &which);
 }
 
 /// The Trash, always in sight: cleaning only moves things there, emptying it frees the space.
