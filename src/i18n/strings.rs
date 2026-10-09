@@ -888,4 +888,11 @@ pub static TABLE: &[(&str, &str, &str, &str, &str)] = &[
     ("It would take now", "Сейчас было бы убрано", "Serait nettoyé maintenant", "Ahora se limpiaría", "Würde jetzt bereinigt"),
     ("Run now…", "Запустить сейчас…", "Lancer maintenant…", "Ejecutar ahora…", "Jetzt ausführen…"),
     ("You have", "Установлена", "Installée", "Instalada", "Installiert"),
+    ("Selected to clean", "Выбрано для очистки", "Sélectionné pour le nettoyage", "Seleccionado para limpiar", "Zum Bereinigen ausgewählt"),
+    ("The safe ones are already ticked. Everything goes to the Trash and can be put back.", "Безопасное уже отмечено. Всё уходит в Корзину — можно вернуть.", "Les éléments sûrs sont déjà cochés. Tout va dans la corbeille et peut être remis en place.", "Lo seguro ya está marcado. Todo va a la Papelera y se puede recuperar.", "Sicheres ist bereits angehakt. Alles kommt in den Papierkorb und lässt sich zurücklegen."),
+    ("Clean selected · {0}", "Очистить выбранное · {0}", "Nettoyer la sélection · {0}", "Limpiar lo seleccionado · {0}", "Auswahl bereinigen · {0}"),
+    ("Clean the selected places?", "Очистить выбранное?", "Nettoyer la sélection ?", "¿Limpiar lo seleccionado?", "Auswahl bereinigen?"),
+    ("Clean only this", "Очистить только это", "Nettoyer seulement ceci", "Limpiar solo esto", "Nur dies bereinigen"),
+    ("Nothing to clean — all tidy.", "Чистить нечего — всё в порядке.", "Rien à nettoyer — tout est en ordre.", "Nada que limpiar — todo en orden.", "Nichts zu bereinigen — alles in Ordnung."),
+    ("The space is freed only when the Trash is emptied.", "Место освободится только после очистки Корзины.", "L’espace n’est libéré que lorsque la corbeille est vidée.", "El espacio solo se libera al vaciar la Papelera.", "Der Platz wird erst frei, wenn der Papierkorb geleert ist."),
 ];

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.4
+
+- **Cleanup in one click**: System junk is one list instead of a wall of cards. The safe places are ticked from the start, *Clean selected* moves them all to the Trash after a single confirmation, and the Trash with *Empty Trash…* stays in sight at the top. A click on a row ticks it; the right-click menu cleans one place, opens it or shows it in Finder.
+
 ## 0.7.3
 
 - **Page headers stay put**: on Disk and Apps the tabs no longer jump when you switch between sections with and without the side panel; the header is laid out for the width with the panel on all of them. The Classic style wraps its header in a narrow window too.

@@ -287,6 +287,8 @@ pub struct Gui {
     // Cleanup
     pub clean_mode: CleanMode,
     pub targets: Vec<Target>,
+    /// Ids of the cleanup places ticked on the Cleanup page; the safe ones from the start.
+    pub clean_checked: HashSet<&'static str>,
     pub junk: Vec<Junk>,
     pub junk_dirty: bool,
     pub junk_checked: HashSet<PathBuf>,
@@ -546,6 +548,7 @@ impl Gui {
             dupes_keep: HashMap::new(),
             dupes_selected: HashSet::new(),
             clean_mode: CleanMode::System,
+            clean_checked: targets.iter().filter(|t| t.cleanable() && clean::target_safety(t) == disk::DelSafety::Safe).map(|t| t.id).collect(),
             targets,
             junk: Vec::new(),
             junk_dirty: true,

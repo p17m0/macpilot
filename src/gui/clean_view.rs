@@ -113,83 +113,206 @@ fn history(g: &mut Gui, ui: &mut Ui) {
     }
 }
 
+/// Everything in one list: the safe places are ticked from the start, one button cleans them all.
 fn system(g: &mut Gui, ui: &mut Ui) {
-    let safe_total: u64 = g.targets.iter().filter(|t| t.cleanable()).filter_map(|t| t.stat.map(|s| s.size)).sum();
     let measuring = g.targets.iter().any(|t| t.stat.is_none() && disk::present(&t.path));
+    let size_of = |t: &clean::Target| t.stat.map(|s| s.size).unwrap_or(0);
+    // Places that do not exist on this Mac, and empty ones, are not shown. The Trash has a line of its own.
+    let mut rows: Vec<usize> = (0..g.targets.len())
+        .filter(|i| {
+            let t = &g.targets[*i];
+            t.kind != Kind::Trash && disk::present(&t.path) && t.stat.is_none_or(|s| s.size > 0)
+        })
+        .collect();
+    // What can be cleaned comes first; biggest first once everything is measured (rows do not
+    // jump around while sizes come in).
+    rows.sort_by_key(|i| {
+        let t = &g.targets[*i];
+        (!t.cleanable(), std::cmp::Reverse(if measuring { 0 } else { size_of(t) }))
+    });
+    let cleanable: Vec<usize> = rows.iter().copied().filter(|i| g.targets[*i].cleanable()).collect();
+    let selected: Vec<usize> =
+        cleanable.iter().copied().filter(|i| g.clean_checked.contains(g.targets[*i].id) && size_of(&g.targets[*i]) > 0).collect();
+    let selected_size: u64 = selected.iter().map(|i| size_of(&g.targets[*i])).sum();
+    let all_on = !cleanable.is_empty() && cleanable.iter().all(|i| g.clean_checked.contains(g.targets[*i].id));
+
+    let mut clean_now: Option<Vec<usize>> = None;
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(RichText::new(tr("Can be freed safely")).color(C::dim(ui)));
+            ui.label(RichText::new(tr("Selected to clean")).color(C::dim(ui)));
             ui.horizontal(|ui| {
-                ui.label(RichText::new(fmt::bytes(safe_total)).metric().color(C::text(ui)));
+                ui.label(RichText::new(fmt::bytes(selected_size)).metric().color(C::text(ui)));
                 if measuring {
                     ui.spinner();
                 }
             });
-            ui.label(RichText::new(tr("Everything goes to the Trash. The space is freed when you empty it.")).color(C::dim(ui)));
+            ui.label(RichText::new(tr("The safe ones are already ticked. Everything goes to the Trash and can be put back.")).color(C::dim(ui)));
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(tr("⟳ Measure again")).clicked() {
+            let label = trf("Clean selected · {0}", &[&fmt::bytes(selected_size)]);
+            if w::big_button(ui, &label, C::accent(), !selected.is_empty()).clicked() {
+                clean_now = Some(selected.clone());
+            }
+            if w::plain_button(ui, tr("⟳ Measure again")).clicked() {
                 g.remeasure_targets();
             }
         });
     });
     ui.add_space(w::sp::M);
-    stale_banner(g, ui);
+    trash_line(g, ui);
     ui.add_space(w::sp::S);
+
+    let mut toggle: Option<&'static str> = None;
+    let mut toggle_all = false;
+    let mut open: Option<usize> = None;
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        let cols = ((ui.available_width() / 360.0).floor() as usize).clamp(1, 4);
-        // Places that do not exist on this Mac are not shown.
-        let shown: Vec<usize> = (0..g.targets.len())
-            .filter(|i| {
-                let t = &g.targets[*i];
-                // Empty places are hidden too; the Trash card always stays.
-                t.kind == Kind::Trash || (disk::present(&t.path) && t.stat.is_none_or(|s| s.size > 0))
-            })
-            .collect();
-        // Biggest first, once everything is measured (cards do not jump around while sizes come in).
-        let mut shown = shown;
-        if !measuring {
-            let key = |i: &usize| {
-                let t = &g.targets[*i];
-                (t.kind == Kind::Trash, std::cmp::Reverse(t.stat.map(|s| s.size).unwrap_or(0)))
-            };
-            shown.sort_by_key(key);
-        }
-        let n = shown.len();
-        let mut action: Option<(usize, CardAction)> = None;
-        for start in (0..n).step_by(cols) {
-            ui.columns(cols, |columns| {
-                for (ci, col) in columns.iter_mut().enumerate() {
-                    let k = start + ci;
-                    if k < n {
-                        let i = shown[k];
-                        if let Some(a) = target_card(g, col, i) {
-                            action = Some((i, a));
+        if rows.is_empty() {
+            w::empty(ui, tr("Nothing to clean — all tidy."));
+        } else {
+            TableBuilder::new(ui)
+                .striped(true)
+                .vscroll(false)
+                .sense(Sense::click())
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::exact(28.0))
+                .column(Column::remainder().at_least(240.0).clip(true))
+                .column(Column::exact(110.0))
+                .column(Column::exact(90.0))
+                .column(Column::exact(96.0))
+                .header(24.0, |mut h| {
+                    h.col(|ui| {
+                        let mut on = all_on;
+                        let tip = if all_on { tr("Deselect all") } else { tr("Select all") };
+                        if ui.add_enabled(!cleanable.is_empty(), egui::Checkbox::new(&mut on, "")).on_hover_text(tip).changed() {
+                            toggle_all = true;
                         }
+                    });
+                    for t in [tr("What"), "", tr("Size"), ""] {
+                        h.col(|ui| {
+                            ui.label(RichText::new(t).semibold().color(C::dim(ui)));
+                        });
                     }
-                }
-            });
-            ui.add_space(w::sp::S);
+                })
+                .body(|body| {
+                    body.rows(44.0, rows.len(), |mut row| {
+                        let i = rows[row.index()];
+                        let t = &g.targets[i];
+                        row.col(|ui| {
+                            if t.cleanable() {
+                                let mut on = g.clean_checked.contains(t.id);
+                                if ui.checkbox(&mut on, "").changed() {
+                                    toggle = Some(t.id);
+                                }
+                            }
+                        });
+                        row.col(|ui| {
+                            icons::app(ui, &target_icon(t), 22.0);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                ui.add(egui::Label::new(RichText::new(t.label).semibold()).selectable(false));
+                                // One line here; the whole hint and the path on hover.
+                                let hint = RichText::new(t.hint.replace('`', "")).caption().color(C::dim(ui));
+                                ui.add(egui::Label::new(hint).selectable(false).truncate()).on_hover_ui(|ui| {
+                                    ui.set_max_width(420.0);
+                                    w::text_with_code(ui, t.hint, C::text(ui));
+                                    ui.label(RichText::new(fmt::path(&t.path)).caption().color(C::dim(ui)));
+                                });
+                            });
+                        });
+                        row.col(|ui| match t.kind {
+                            Kind::Manual => {
+                                w::badge(ui, tr("by hand"), C::yellow());
+                            }
+                            _ => {
+                                w::del_badge(ui, clean::target_safety(t));
+                            }
+                        });
+                        row.col(|ui| {
+                            let (txt, color) = match t.stat {
+                                Some(s) => (fmt::bytes(s.size), w::size_color(ui, s.size)),
+                                None => (tr("measuring…").to_string(), C::dim(ui)),
+                            };
+                            ui.add(egui::Label::new(RichText::new(txt).color(color)).selectable(false));
+                        });
+                        row.col(|ui| {
+                            if ui.button(tr("Open")).clicked() {
+                                open = Some(i);
+                            }
+                        });
+                        let resp = row.response();
+                        if resp.clicked() && t.cleanable() {
+                            toggle = Some(t.id);
+                        }
+                        resp.context_menu(|ui| {
+                            if t.cleanable() && ui.add_enabled(size_of(t) > 0, egui::Button::new(tr("Clean only this"))).clicked() {
+                                clean_now = Some(vec![i]);
+                                ui.close();
+                            }
+                            if ui.button(tr("Open")).clicked() {
+                                open = Some(i);
+                                ui.close();
+                            }
+                            if ui.button(tr("Show in Finder")).clicked() {
+                                macpilot::trash::reveal_in_finder(&t.path);
+                                ui.close();
+                            }
+                        });
+                    });
+                });
         }
-        if let Some((i, a)) = action {
-            match a {
-                CardAction::Clean => ask_clean(g, i),
-                CardAction::Open => {
-                    let p = g.targets[i].path.clone();
-                    g.go_page(Page::Disk);
-                    g.disk_mode = DiskMode::List;
-                    g.go(p);
-                }
-                CardAction::EmptyTrash => ask_empty_trash(g, i),
+        ui.add_space(w::sp::M);
+        stale_banner(g, ui);
+    });
+
+    if toggle_all {
+        for i in &cleanable {
+            let id = g.targets[*i].id;
+            if all_on {
+                g.clean_checked.remove(id);
+            } else {
+                g.clean_checked.insert(id);
             }
         }
-    });
+    }
+    if let Some(id) = toggle {
+        if !g.clean_checked.remove(id) {
+            g.clean_checked.insert(id);
+        }
+    }
+    if let Some(i) = open {
+        let p = g.targets[i].path.clone();
+        g.go_page(Page::Disk);
+        g.disk_mode = DiskMode::List;
+        g.go(p);
+    }
+    if let Some(which) = clean_now {
+        ask_clean(g, &which);
+    }
 }
 
-enum CardAction {
-    Clean,
-    Open,
-    EmptyTrash,
+/// The Trash, always in sight: cleaning only moves things there, emptying it frees the space.
+fn trash_line(g: &mut Gui, ui: &mut Ui) {
+    let Some(i) = g.targets.iter().position(|t| t.kind == Kind::Trash) else { return };
+    let t = &g.targets[i];
+    let size = t.stat.map(|s| s.size);
+    let mut empty = false;
+    w::card(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.horizontal(|ui| {
+            icons::app(ui, &target_icon(t), 22.0);
+            ui.label(RichText::new(t.label).headline());
+            ui.label(RichText::new(size.map_or(tr("measuring…").to_string(), fmt::bytes)).headline().color(C::dim(ui)));
+            ui.label(RichText::new(tr("The space is freed only when the Trash is emptied.")).color(C::dim(ui)));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if w::tinted_button(ui, tr("Empty Trash…"), C::red(), size.is_some_and(|s| s > 0)).clicked() {
+                    empty = true;
+                }
+            });
+        });
+    });
+    if empty {
+        ask_empty_trash(g, i);
+    }
 }
 
 /// What a cleanup place looks like: the app it belongs to when there is one (Xcode, Mail, Docker…),
@@ -208,90 +331,61 @@ fn target_icon(t: &clean::Target) -> PathBuf {
     app.map(PathBuf::from).filter(|p| p.exists()).unwrap_or_else(|| t.path.clone())
 }
 
-fn target_card(g: &Gui, ui: &mut Ui, i: usize) -> Option<CardAction> {
-    let t = &g.targets[i];
-    let exists = disk::present(&t.path);
-    let mut out = None;
-    w::card(ui, |ui| {
-        ui.set_min_width(ui.available_width());
-        ui.set_min_height(150.0);
-        ui.horizontal(|ui| {
-            icons::app(ui, &target_icon(t), 22.0);
-            ui.label(RichText::new(t.label).headline());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match t.kind {
-                Kind::Clean => {
-                    w::del_badge(ui, clean::target_safety(t));
-                }
-                Kind::Manual => {
-                    w::badge(ui, tr("by hand"), C::yellow());
-                }
-                Kind::Trash => {}
-            });
-        });
-        let (txt, color) = match (exists, t.stat) {
-            (false, _) => (tr("none").to_string(), C::dim(ui)),
-            (true, Some(s)) => (fmt::bytes(s.size), w::size_color(ui, s.size)),
-            (true, None) => (tr("measuring…").to_string(), C::dim(ui)),
+/// One confirmation for all the given places.
+fn ask_clean(g: &mut Gui, which: &[usize]) {
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut lines: Vec<(String, Level)> = Vec::new();
+    let mut installers: Vec<PathBuf> = Vec::new();
+    let mut total = 0;
+    let mut failed = None;
+    for &i in which {
+        let t = &g.targets[i];
+        let children: Vec<PathBuf> = match std::fs::read_dir(&t.path) {
+            // Not the whole Downloads folder: only the installers that have been lying there for a month.
+            Ok(_) if t.id == "installers" => clean::old_installers(&t.path, disk::now_unix()).into_iter().map(|f| f.0).collect(),
+            Ok(rd) => rd.flatten().map(|e| e.path()).filter(|c| disk::deletion_safety(c).0 != DelSafety::Blocked).collect(),
+            Err(e) => {
+                failed = Some(format!("{}: {}", fmt::path(&t.path), disk::perm_hint(&e)));
+                continue;
+            }
         };
-        ui.label(RichText::new(txt).title().color(color));
-        ui.label(RichText::new(fmt::path(&t.path)).caption().color(C::dim(ui)));
-        ui.add_space(2.0);
-        w::text_with_code(ui, t.hint, C::dim(ui));
-        ui.add_space(w::sp::S);
-        ui.horizontal(|ui| {
-            let has = exists && t.stat.is_some_and(|s| s.size > 0);
-            match t.kind {
-                Kind::Clean => {
-                    if w::tinted_button(ui, tr("Clean"), C::accent(), has).clicked() {
-                        out = Some(CardAction::Clean);
-                    }
-                }
-                Kind::Trash => {
-                    if w::tinted_button(ui, tr("Empty Trash…"), C::red(), has).clicked() {
-                        out = Some(CardAction::EmptyTrash);
-                    }
-                }
-                Kind::Manual => {}
-            }
-            if t.kind != Kind::Trash
-                && ui.add_enabled(exists, egui::Button::new(tr("Open")).corner_radius(w::button_radius()).min_size(egui::vec2(0.0, 32.0))).clicked()
-            {
-                out = Some(CardAction::Open);
-            }
-        });
-    });
-    out
-}
-
-fn ask_clean(g: &mut Gui, i: usize) {
-    let t = g.targets[i].clone();
-    let children: Vec<PathBuf> = match std::fs::read_dir(&t.path) {
-        // Not the whole Downloads folder: only the installers that have been lying there for a month.
-        Ok(_) if t.id == "installers" => clean::old_installers(&t.path, disk::now_unix()).into_iter().map(|f| f.0).collect(),
-        Ok(rd) => rd.flatten().map(|e| e.path()).filter(|c| disk::deletion_safety(c).0 != DelSafety::Blocked).collect(),
-        Err(e) => {
-            g.toast(format!("{}: {}", fmt::path(&t.path), disk::perm_hint(&e)), Level::Danger);
-            return;
+        if children.is_empty() {
+            continue;
         }
-    };
-    if children.is_empty() {
-        g.toast(trf("“{0}” is already empty.", &[&t.label]), Level::Info);
+        let size = t.stat.map(|s| s.size).unwrap_or(0);
+        total += size;
+        lines.push((format!("{} — {}, {}", t.label, fmt::n(children.len() as u64, fmt::Noun::Item), fmt::bytes(size)), Level::Info));
+        if t.id == "installers" {
+            installers = children.clone();
+        }
+        paths.extend(children);
+    }
+    if paths.is_empty() {
+        match (failed, which) {
+            (Some(e), _) => g.toast(e, Level::Danger),
+            (None, [i]) => g.toast(trf("“{0}” is already empty.", &[&g.targets[*i].label]), Level::Info),
+            (None, _) => g.toast(tr("Nothing to clean up right now."), Level::Info),
+        }
         return;
     }
-    let st = t.stat.unwrap_or_default();
-    let mut lines = vec![
-        (format!("{} — {}, {}", fmt::path(&t.path), fmt::n(children.len() as u64, fmt::Noun::Item), fmt::bytes(st.size)), Level::Info),
-        (t.hint.to_string(), Level::Info),
-        (tr("The contents go to the Trash (the folder itself stays).").into(), Level::Ok),
-    ];
-    if t.id == "installers" {
-        lines[2].0 = tr("Only these installers go to the Trash; everything else in Downloads stays.").into();
-        lines.extend(children.iter().take(8).map(|c| (c.file_name().unwrap_or_default().to_string_lossy().to_string(), Level::Info)));
-        if children.len() > 8 {
-            lines.push((trf("…and {0} more", &[&(children.len() - 8)]), Level::Info));
+    let title = match which {
+        [i] => {
+            let t = &g.targets[*i];
+            lines[0].0 = format!("{} — {}", fmt::path(&t.path), lines[0].0.rsplit(" — ").next().unwrap_or_default());
+            lines.push((t.hint.replace('`', ""), Level::Info));
+            trf("Clean “{0}”?", &[&t.label])
+        }
+        _ => tr("Clean the selected places?").to_string(),
+    };
+    lines.push((tr("The contents go to the Trash (the folder itself stays).").into(), Level::Ok));
+    if !installers.is_empty() {
+        lines.push((tr("Only these installers go to the Trash; everything else in Downloads stays.").into(), Level::Ok));
+        lines.extend(installers.iter().take(8).map(|c| (c.file_name().unwrap_or_default().to_string_lossy().to_string(), Level::Info)));
+        if installers.len() > 8 {
+            lines.push((trf("…and {0} more", &[&(installers.len() - 8)]), Level::Info));
         }
     }
-    if t.id == "caches" {
+    if which.iter().any(|i| g.targets[*i].id == "caches") {
         let running: Vec<String> = g
             .snap
             .procs
@@ -306,7 +400,7 @@ fn ask_clean(g: &mut Gui, i: usize) {
             lines.push((trf("Tip: quit apps first: {0}", &[&running.join(", ")]), Level::Warn));
         }
     }
-    g.confirm = Some(Confirm::new(trf("Clean “{0}”?", &[&t.label]), lines, Action::Trash { paths: children, size: st.size }, tr("Clean")));
+    g.confirm = Some(Confirm::new(title, lines, Action::Trash { paths, size: total }, tr("Clean")));
 }
 
 fn ask_empty_trash(g: &mut Gui, i: usize) {
