@@ -45,17 +45,16 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 fn history(g: &mut Gui, ui: &mut Ui) {
     use macpilot::trashlog::State;
     let in_trash: u64 = g.trash_log.iter().filter(|e| e.state == State::InTrash).map(|e| e.size).sum();
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
+    w::split_row(ui, "clean_view.rs:48", |ui, right| {
+        if !right {
             ui.label(RichText::new(tr("Moved to the Trash by MacPilot and still there")).color(C::dim(ui)));
             ui.label(RichText::new(fmt::bytes(in_trash)).metric().color(C::text(ui)));
             ui.label(RichText::new(tr("Kept for 90 days. Anything still in the Trash can be put back where it was.")).color(C::dim(ui)));
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        } else {
             if w::button(ui, tr("Open the Trash")).clicked() {
                 macpilot::trash::open_trash();
             }
-        });
+        }
     });
     ui.add_space(w::sp::M);
     if g.trash_log.is_empty() {
@@ -137,8 +136,8 @@ fn system(g: &mut Gui, ui: &mut Ui) {
     let all_on = !cleanable.is_empty() && cleanable.iter().all(|i| g.clean_checked.contains(g.targets[*i].id));
 
     let mut clean_now: Option<Vec<usize>> = None;
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
+    w::split_row(ui, "clean_view.rs:139", |ui, right| {
+        if !right {
             ui.label(RichText::new(tr("Selected to clean")).color(C::dim(ui)));
             ui.horizontal(|ui| {
                 ui.label(RichText::new(fmt::bytes(selected_size)).metric().color(C::text(ui)));
@@ -147,8 +146,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                 }
             });
             ui.label(RichText::new(tr("The safe ones are already ticked. Everything goes to the Trash and can be put back.")).color(C::dim(ui)));
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        } else {
             let label = trf("Clean selected · {0}", &[&fmt::bytes(selected_size)]);
             if w::big_button(ui, &label, C::accent(), !selected.is_empty()).on_hover_text(tr("⇧⌘K from any page")).clicked() {
                 clean_now = Some(selected.clone());
@@ -156,7 +154,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
             if w::plain_button(ui, tr("⟳ Measure again")).clicked() {
                 g.remeasure_targets();
             }
-        });
+        }
     });
     ui.add_space(w::sp::M);
     trash_line(g, ui);
@@ -460,8 +458,8 @@ fn stale_banner(g: &mut Gui, ui: &mut Ui) {
     let mut open = false;
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        w::split_row(ui, "clean_view.rs:461", |ui, right| {
+            if !right {
                 ui.label(RichText::new(tr("Not used for a long time")).headline());
                 if ready {
                     let total: u64 = g.stale.iter().map(|i| i.size).sum();
@@ -472,12 +470,11 @@ fn stale_banner(g: &mut Gui, ui: &mut Ui) {
                 } else {
                     ui.label(RichText::new(tr("Needs a disk scan — it is running in the background.")).color(C::dim(ui)));
                 }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            } else {
                 if w::plain_button(ui, tr("Review")).clicked() {
                     open = true;
                 }
-            });
+            }
         });
     });
     if open {
@@ -517,15 +514,14 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
     ui.add_space(w::sp::XS);
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        w::split_row(ui, "clean_view.rs:517", |ui, right| {
+            if !right {
                 ui.label(
                     RichText::new(trf("{1}: {0}, {2} in total", &[&fmt::n(g.junk.len() as u64, fmt::Noun::BuildFolder), &root, &fmt::bytes(total)]))
                         .color(C::dim(ui)),
                 );
                 ui.label(RichText::new(trf("{0} in inactive projects", &[&fmt::bytes(old)])).metric().color(C::text(ui)));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            } else {
                 let label = trf("Move {0} to Trash · {1}", &[&checked.len(), &fmt::bytes(checked_size)]);
                 if w::big_button(ui, &label, C::red(), !checked.is_empty()).clicked() {
                     let size = checked_size;
@@ -543,7 +539,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                 if w::plain_button(ui, tr("Select inactive")).clicked() {
                     g.junk_checked = g.junk.iter().filter(|j| j.project_modified < cutoff).map(|j| j.path.clone()).collect();
                 }
-            });
+            }
         });
         ui.label(
             RichText::new(tr("Build output and dependencies can always be recreated. What matters is when the project itself was last changed — builds of old projects are pure junk."))

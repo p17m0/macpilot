@@ -379,7 +379,11 @@ pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f3
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.label(RichText::new(title).color(C::dim(ui)));
-        ui.add(egui::Label::new(RichText::new(value).metric().color(w::value_color(ui, ratio))).truncate());
+        // The big number shrinks to fit a narrow card instead of being cut ("free 30…").
+        let color = w::value_color(ui, ratio);
+        let full = ui.painter().layout_no_wrap(value.clone(), w::metric_font(w::ty::METRIC), color).size().x;
+        let k = (ui.available_width() / full.max(1.0)).clamp(0.6, 1.0);
+        ui.add(egui::Label::new(RichText::new(value).metric().size(w::ty::METRIC * k).color(color)).truncate());
         // One line, so the cards of a row keep the same height; the whole text is in the tooltip.
         ui.add(egui::Label::new(RichText::new(sub).caption().color(C::dim(ui))).truncate());
         ui.add_space(w::sp::S);

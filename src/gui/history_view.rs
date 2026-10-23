@@ -65,20 +65,19 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
             let month = disk::now_unix() - 30 * 86_400;
             let trashed: u64 = g.actions.iter().filter(|e| e.at >= month && matches!(e.kind, Kind::Trash | Kind::AutoClean)).map(|e| e.size).sum();
             let mut to_trash_log = false;
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
+            w::split_row(ui, "history_view.rs:68", |ui, right| {
+                if !right {
                     ui.label(RichText::new(tr("Moved to the Trash in the last 30 days")).color(C::dim(ui)));
                     ui.label(RichText::new(fmt::bytes(trashed)).metric().color(C::text(ui)));
                     ui.label(RichText::new(tr("What MacPilot did on this Mac, kept for 90 days. Nothing leaves the Mac.")).color(C::dim(ui)));
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                } else {
                     if w::plain_button(ui, tr("Put things back…"))
                         .on_hover_text(tr("The list of what is still in the Trash, with Put Back"))
                         .clicked()
                     {
                         to_trash_log = true;
                     }
-                });
+                }
             });
             if to_trash_log {
                 g.clean_mode = CleanMode::History;

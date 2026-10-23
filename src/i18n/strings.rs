@@ -932,4 +932,5 @@ pub static TABLE: &[(&str, &str, &str, &str, &str)] = &[
     ("Rose", "Роза", "Rose", "Rosa", "Rosé"),
     ("Midnight", "Полночь", "Minuit", "Medianoche", "Mitternacht"),
     ("The look of the whole app: the standard one, or after a classic computer or console.", "Вид всего приложения: стандартный или в духе классического компьютера или приставки.", "L’allure de toute l’app : standard, ou d’après un ordinateur ou une console classique.", "El aspecto de toda la app: el estándar, o inspirado en un ordenador o una consola clásicos.", "Das Aussehen der ganzen App: Standard oder nach einem klassischen Computer oder einer Konsole."),
+    ("With what macOS can free by itself: {0} available, as in the sidebar.", "С тем, что macOS освободит сама, доступно {0} — как в боковой панели.", "Avec ce que macOS libère de lui-même : {0} disponibles, comme dans la barre latérale.", "Con lo que macOS libera por sí mismo: {0} disponibles, como en la barra lateral.", "Mit dem, was macOS selbst freigibt: {0} verfügbar, wie in der Seitenleiste."),
 ];

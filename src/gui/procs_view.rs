@@ -164,6 +164,19 @@ fn sort_header(g: &mut Gui, ui: &mut Ui, label: &str, key: SortKey) {
     r.on_hover_cursor(egui::CursorIcon::PointingHand);
 }
 
+/// A name that gives way to its "network" badge: the name is cut short, the badge stays whole.
+fn name_with_badge(ui: &mut Ui, name: &str, network: bool) {
+    let badge = if network { w::badge_width(ui, tr("network")) + ui.spacing().item_spacing.x } else { 0.0 };
+    let room = (ui.available_width() - badge).max(24.0);
+    ui.scope(|ui| {
+        ui.set_max_width(room);
+        ui.add(egui::Label::new(RichText::new(name).color(C::text(ui))).truncate().selectable(false)).on_hover_text(name);
+    });
+    if network {
+        w::badge(ui, tr("network"), C::purple());
+    }
+}
+
 fn plain_header(ui: &mut Ui, label: &str) {
     ui.label(RichText::new(label).semibold().color(C::dim(ui)));
 }
@@ -191,44 +204,83 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
     let mut clicked: Option<Sel> = None;
     let mut ctx_action: Option<(Sel, CtxAction)> = None;
     let apps = g.view == ProcView::Apps;
-    let mut tb = TableBuilder::new(ui).striped(true).sense(Sense::click()).cell_layout(egui::Layout::left_to_right(egui::Align::Center));
-    tb = if apps {
-        tb.column(Column::remainder().at_least(160.0).clip(true))
-            .column(Column::exact(76.0))
-            .column(Column::exact(66.0))
-            .column(Column::exact(72.0))
-            .column(Column::exact(88.0))
-            .column(Column::exact(118.0))
-            .column(Column::exact(84.0))
+    // In a narrow window the less important columns give way, so memory and safety stay in sight.
+    // Kept in this order: the last ones go first.
+    let (show_count, show_net, show_power, show_pid, show_user, show_status) = if apps {
+        let f = w::fitting_columns(ui, 140.0 + 66.0 + 118.0 + 84.0, 4, &[88.0, 76.0, 72.0]);
+        (f[1], f[0], f[2], false, false, false)
     } else {
-        tb.column(Column::remainder().at_least(160.0).clip(true))
-            .column(Column::exact(64.0))
-            .column(Column::exact(90.0).clip(true))
-            .column(Column::exact(64.0))
-            .column(Column::exact(72.0))
-            .column(Column::exact(88.0))
-            .column(Column::exact(118.0))
-            .column(Column::exact(82.0))
-            .column(Column::exact(96.0))
+        let f = w::fitting_columns(ui, 140.0 + 64.0 + 118.0 + 96.0, 4, &[64.0, 88.0, 72.0, 90.0, 82.0]);
+        (false, f[1], f[2], f[0], f[3], f[4])
     };
+    let mut tb = TableBuilder::new(ui).striped(true).sense(Sense::click()).cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+    tb = tb.column(Column::remainder().at_least(140.0).clip(true));
+    if apps {
+        if show_count {
+            tb = tb.column(Column::exact(76.0));
+        }
+        tb = tb.column(Column::exact(66.0));
+        if show_power {
+            tb = tb.column(Column::exact(72.0));
+        }
+        if show_net {
+            tb = tb.column(Column::exact(88.0));
+        }
+        tb = tb.column(Column::exact(118.0)).column(Column::exact(84.0));
+    } else {
+        if show_pid {
+            tb = tb.column(Column::exact(64.0));
+        }
+        if show_user {
+            tb = tb.column(Column::exact(90.0).clip(true));
+        }
+        tb = tb.column(Column::exact(64.0));
+        if show_power {
+            tb = tb.column(Column::exact(72.0));
+        }
+        if show_net {
+            tb = tb.column(Column::exact(88.0));
+        }
+        tb = tb.column(Column::exact(118.0));
+        if show_status {
+            tb = tb.column(Column::exact(82.0));
+        }
+        tb = tb.column(Column::exact(96.0));
+    }
     tb.header(24.0, |mut h| {
         if apps {
             h.col(|ui| sort_header(g, ui, tr("App"), SortKey::Name));
-            h.col(|ui| sort_header(g, ui, tr("Processes"), SortKey::Count));
+            if show_count {
+                h.col(|ui| sort_header(g, ui, tr("Processes"), SortKey::Count));
+            }
             h.col(|ui| sort_header(g, ui, "CPU", SortKey::Cpu));
-            h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
-            h.col(|ui| sort_header(g, ui, tr("Network"), SortKey::Net));
+            if show_power {
+                h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
+            }
+            if show_net {
+                h.col(|ui| sort_header(g, ui, tr("Network"), SortKey::Net));
+            }
             h.col(|ui| sort_header(g, ui, tr("Memory"), SortKey::Mem));
             h.col(|ui| plain_header(ui, tr("Safety")));
         } else {
             h.col(|ui| sort_header(g, ui, tr("Name"), SortKey::Name));
-            h.col(|ui| sort_header(g, ui, "PID", SortKey::Pid));
-            h.col(|ui| plain_header(ui, tr("User")));
+            if show_pid {
+                h.col(|ui| sort_header(g, ui, "PID", SortKey::Pid));
+            }
+            if show_user {
+                h.col(|ui| plain_header(ui, tr("User")));
+            }
             h.col(|ui| sort_header(g, ui, "CPU", SortKey::Cpu));
-            h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
-            h.col(|ui| sort_header(g, ui, tr("Network"), SortKey::Net));
+            if show_power {
+                h.col(|ui| sort_header(g, ui, tr("Energy"), SortKey::Power));
+            }
+            if show_net {
+                h.col(|ui| sort_header(g, ui, tr("Network"), SortKey::Net));
+            }
             h.col(|ui| sort_header(g, ui, tr("Memory"), SortKey::Mem));
-            h.col(|ui| plain_header(ui, tr("Status")));
+            if show_status {
+                h.col(|ui| plain_header(ui, tr("Status")));
+            }
             h.col(|ui| plain_header(ui, tr("Safety")));
         }
     })
@@ -239,19 +291,22 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                 row.set_selected(g.sel.as_ref() == Some(&sel));
                 row.col(|ui| {
                     icons::process(ui, gr.app.as_deref(), 18.0);
-                    ui.label(RichText::new(&gr.label).color(C::text(ui)));
-                    if gr.pids.iter().any(|p| ports.contains_key(p)) {
-                        w::badge(ui, tr("network"), C::purple());
-                    }
+                    name_with_badge(ui, &gr.label, gr.pids.iter().any(|p| ports.contains_key(p)));
                 });
-                row.col(|ui| {
-                    ui.label(RichText::new(gr.pids.len().to_string()).color(if gr.pids.len() >= 200 { C::red() } else { C::dim(ui) }));
-                });
+                if show_count {
+                    row.col(|ui| {
+                        ui.label(RichText::new(gr.pids.len().to_string()).color(if gr.pids.len() >= 200 { C::red() } else { C::dim(ui) }));
+                    });
+                }
                 row.col(|ui| {
                     ui.label(RichText::new(fmt::pct(gr.cpu)).color(w::cpu_color(ui, gr.cpu)));
                 });
-                row.col(|ui| power_cell(ui, gr.power));
-                row.col(|ui| net_cell(ui, net_of(&net, &gr.pids)));
+                if show_power {
+                    row.col(|ui| power_cell(ui, gr.power));
+                }
+                if show_net {
+                    row.col(|ui| net_cell(ui, net_of(&net, &gr.pids)));
+                }
                 row.col(|ui| mem_cell(ui, gr.mem, max_mem));
                 row.col(|ui| {
                     // Only what is not simply yours is marked: the exceptions stand out.
@@ -275,30 +330,37 @@ fn table(g: &mut Gui, ui: &mut Ui, rows: &[Row]) {
                         ui.label(RichText::new("└").color(C::dim(ui)));
                     }
                     icons::process(ui, p.app.as_deref(), 18.0);
-                    ui.label(RichText::new(&p.name).color(C::text(ui)));
-                    if ports.contains_key(pid) {
-                        w::badge(ui, tr("network"), C::purple());
-                    }
+                    name_with_badge(ui, &p.name, ports.contains_key(pid));
                 });
-                row.col(|ui| {
-                    ui.label(RichText::new(p.pid.to_string()).color(C::dim(ui)));
-                });
-                row.col(|ui| {
-                    ui.label(RichText::new(&p.user).color(C::dim(ui)));
-                });
+                if show_pid {
+                    row.col(|ui| {
+                        ui.label(RichText::new(p.pid.to_string()).color(C::dim(ui)));
+                    });
+                }
+                if show_user {
+                    row.col(|ui| {
+                        ui.label(RichText::new(&p.user).color(C::dim(ui)));
+                    });
+                }
                 row.col(|ui| {
                     ui.label(RichText::new(fmt::pct(p.cpu)).color(w::cpu_color(ui, p.cpu)));
                 });
-                row.col(|ui| power_cell(ui, p.power));
-                row.col(|ui| net_cell(ui, net_of(&net, &[p.pid])));
+                if show_power {
+                    row.col(|ui| power_cell(ui, p.power));
+                }
+                if show_net {
+                    row.col(|ui| net_cell(ui, net_of(&net, &[p.pid])));
+                }
                 row.col(|ui| mem_cell(ui, p.mem, max_mem));
-                row.col(|ui| {
-                    if p.stopped {
-                        w::badge(ui, tr("paused"), C::purple());
-                    } else {
-                        ui.label(RichText::new(p.status).color(C::dim(ui)));
-                    }
-                });
+                if show_status {
+                    row.col(|ui| {
+                        if p.stopped {
+                            w::badge(ui, tr("paused"), C::purple());
+                        } else {
+                            ui.label(RichText::new(p.status).color(C::dim(ui)));
+                        }
+                    });
+                }
                 row.col(|ui| {
                     if p.safety != Safety::User {
                         w::safety_badge(ui, p.safety);

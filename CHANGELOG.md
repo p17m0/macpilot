@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.2
+
+- **Fixes for narrow windows** (the smallest window, or any with the side panel open):
+  - Buttons no longer draw over the big numbers on Disk → Duplicates and Not used, Cleanup and Apps → Leftovers: when text and buttons do not fit side by side, the buttons move under the text.
+  - Processes keeps Memory and Safety in sight: the less important columns (Energy, Network, PID, User, Status) give way first. The *network* badge stays whole; a long name is cut short instead, with the full name on hover.
+  - The Disk list, Big files and Not used tables fit next to the side panel: *Modified* gives way first, and the Removal badges are no longer cut off.
+  - The big numbers on the Overview shrink to fit their card instead of ending in "…".
+- Dates from six months to a year ago were light yellow and hard to read on light and gray backgrounds; they are now a darker shade of the warning color.
+- Disk → Summary says why its free space differs from the sidebar's: the sidebar counts what macOS can free by itself.
+
 ## 0.8.1
 
 - **Two iOS styles** (Settings → Style): **iOS 6** — the glossy blue-gray navigation bar with an engraved title, rounded white groups on blue-gray, shiny buttons, blue switches, Helvetica; and **iOS 7** — flat white with hairlines, big light headers, everything you can press in the tint color, outlined buttons and segments, green switches.

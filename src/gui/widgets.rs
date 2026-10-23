@@ -374,6 +374,11 @@ impl Txt for RichText {
     }
 }
 
+/// The face of big numbers ([`Txt::metric`]).
+pub fn metric_font(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(DISPLAY_SEMIBOLD.into()))
+}
+
 pub fn semibold_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
 }
@@ -794,6 +799,59 @@ pub fn title_bar_for(ui: &mut Ui, width: f32, title: &str, subtitle: &str, secti
         ui.label(RichText::new(subtitle).color(C::dim(ui)));
     }
     ui.add_space(sp::M);
+}
+
+/// Which optional table columns fit next to the ones that are always shown. `base` is the width
+/// of those (the stretching name column at its smallest); `optional` the widths of the others,
+/// in the order they are given up as the window gets narrower — the last one first.
+pub fn fitting_columns(ui: &Ui, base: f32, base_count: usize, optional: &[f32]) -> Vec<bool> {
+    let gap = ui.spacing().item_spacing.x;
+    let mut used = base + gap * base_count as f32;
+    optional
+        .iter()
+        .map(|w| {
+            let fits = used + w + gap <= ui.available_width();
+            if fits {
+                used += w + gap;
+            }
+            fits
+        })
+        .collect()
+}
+
+/// Text on the left, actions on the right — and when they do not fit side by side (a narrow
+/// window, a long translation), the actions move under the text instead of drawing over it.
+/// `add` is called twice: with `false` for the left part, `true` for the right one. Widths are
+/// known from the last frame, like in [`title_bar`].
+pub fn split_row(ui: &mut Ui, key: &str, mut add: impl FnMut(&mut Ui, bool)) {
+    let id = ui.id().with(("split_row", key));
+    let known: Option<(f32, f32)> = ui.data(|d| d.get_temp(id));
+    let (left_w, right_w) = known.unwrap_or_default();
+    let stacked = known.is_some() && left_w + right_w + sp::L > ui.available_width();
+    let mut widths = (0.0, 0.0);
+    if stacked {
+        widths.0 = ui.scope(|ui| ui.vertical(|ui| add(ui, false))).response.rect.width();
+        ui.add_space(sp::S);
+        // Read in order, from the left: the main action first.
+        // Inside a row, so it takes the height of the buttons and not the rest of the page.
+        ui.horizontal(|ui| {
+            widths.1 =
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.scope(|ui| add(ui, true)).response.rect.width()).inner;
+        });
+    } else {
+        ui.horizontal(|ui| {
+            widths.0 = ui.scope(|ui| ui.vertical(|ui| add(ui, false))).response.rect.width();
+            widths.1 =
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.scope(|ui| add(ui, true)).response.rect.width()).inner;
+        });
+    }
+    if known != Some(widths) {
+        ui.data_mut(|d| d.insert_temp(id, widths));
+        if known.is_none() {
+            ui.ctx().request_discard("split row measured");
+        }
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Page title with an optional subtitle.
@@ -1583,6 +1641,11 @@ pub fn bar(ui: &mut Ui, ratio: f32, size: Vec2, color: Color32) -> egui::Respons
     resp
 }
 
+/// How wide [`badge`] draws `text`.
+pub fn badge_width(ui: &Ui, text: &str) -> f32 {
+    ui.painter().layout_no_wrap(text.to_string(), semibold_font(ty::CAPTION), Color32::WHITE).size().x + 12.0
+}
+
 pub fn badge(ui: &mut Ui, text: &str, color: Color32) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(text.to_string(), semibold_font(ty::CAPTION), color);
     let size = galley.size() + Vec2::new(12.0, 4.0);
@@ -1663,7 +1726,8 @@ pub fn age_color(ui: &Ui, ts: i64) -> Color32 {
     if days >= 365 {
         C::yellow()
     } else if days >= 180 {
-        Color32::from_rgb(220, 190, 120)
+        // Halfway to the yellow of a year: readable on light backgrounds too.
+        mix(C::yellow(), C::text(ui), 0.35)
     } else if days <= 7 {
         C::text(ui)
     } else {

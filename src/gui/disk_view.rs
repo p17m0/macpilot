@@ -236,17 +236,21 @@ fn list(g: &mut Gui, ui: &mut Ui) {
     let mut open: Option<PathBuf> = None;
     let mut select: Option<PathBuf> = None;
     let mut trash: Option<PathBuf> = None;
+    // "Modified" gives way first in a narrow window ("Opened" says more about what is still used).
+    let show_modified = w::fitting_columns(ui, 150.0 + 76.0 + 112.0 + 108.0 + 92.0, 5, &[108.0])[0];
     TableBuilder::new(ui)
         .striped(true)
         .sense(Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::remainder().at_least(160.0).clip(true))
+        .column(Column::remainder().at_least(150.0).clip(true))
         .column(Column::exact(76.0))
-        .column(Column::exact(124.0))
-        .column(Column::exact(108.0))
-        .column(Column::exact(108.0))
+        .column(Column::exact(112.0))
+        .columns(Column::exact(108.0), if show_modified { 2 } else { 1 })
         .column(Column::exact(92.0))
-        .header(24.0, |mut h| heads(&mut h, &[tr("Name"), tr("Size"), tr("Share"), tr("Modified"), tr("Opened"), tr("Removal")]))
+        .header(24.0, |mut h| {
+            let names = [tr("Name"), tr("Size"), tr("Share"), tr("Modified"), tr("Opened"), tr("Removal")];
+            heads(&mut h, &names.into_iter().filter(|n| show_modified || *n != tr("Modified")).collect::<Vec<_>>())
+        })
         .body(|body| {
             body.rows(28.0, g.entries.len(), |mut row| {
                 let e = &g.entries[row.index()];
@@ -274,7 +278,9 @@ fn list(g: &mut Gui, ui: &mut Ui) {
                     w::bar(ui, r, egui::vec2(70.0, 7.0), bar_color(e.size.unwrap_or(0)));
                     ui.label(RichText::new(fmt::pct(r * 100.0)).caption().color(C::dim(ui)));
                 });
-                row.col(|ui| w::time_cell(ui, e.mtime));
+                if show_modified {
+                    row.col(|ui| w::time_cell(ui, e.mtime));
+                }
                 row.col(|ui| w::time_cell(ui, e.used));
                 row.col(|ui| {
                     w::del_badge(ui, safety);
@@ -328,9 +334,9 @@ fn big(g: &mut Gui, ui: &mut Ui) {
         .sense(Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::exact(86.0))
-        .column(Column::remainder().at_least(300.0).clip(true))
+        .column(Column::remainder().at_least(180.0).clip(true))
         .column(Column::exact(120.0))
-        .column(Column::exact(96.0))
+        .column(Column::exact(100.0))
         .header(24.0, |mut h| heads(&mut h, &[tr("Size"), tr("File"), tr("Opened"), tr("Removal")]))
         .body(|body| {
             body.rows(28.0, g.big.len(), |mut row| {
@@ -580,6 +586,14 @@ fn summary(g: &mut Gui, ui: &mut Ui) {
                     .semibold()
                     .size(w::ty::HEADLINE),
             );
+            // The sidebar and the Overview count what macOS can free by itself as free: say why the numbers differ.
+            if let Some(p) = info.purgeable.filter(|p| *p > 1_000_000_000) {
+                ui.label(
+                    RichText::new(trf("With what macOS can free by itself: {0} available, as in the sidebar.", &[&fmt::bytes(v.free + p)]))
+                        .callout()
+                        .color(C::dim(ui)),
+                );
+            }
             ui.add_space(w::sp::S);
             // Pointing at a part of the bar lights up its line in the legend, and the other way round.
             let hover_id = ui.id().with("summary_hover");
@@ -761,12 +775,11 @@ fn stale(g: &mut Gui, ui: &mut Ui) {
     let (checked_n, checked_size) = (checked.len(), checked.iter().map(|i| i.size).sum::<u64>());
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        w::split_row(ui, "disk_view.rs:764", |ui, right| {
+            if !right {
                 ui.label(RichText::new(trf("{0}: found {1}", &[&root, &fmt::n(g.stale.len() as u64, fmt::Noun::Item)])).color(C::dim(ui)));
                 ui.label(RichText::new(fmt::bytes(total)).metric().color(C::yellow()));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            } else {
                 let label = if checked_n > 0 {
                     trf("Move {0} to Trash · {1}", &[&checked_n, &fmt::bytes(checked_size)])
                 } else {
@@ -783,7 +796,7 @@ fn stale(g: &mut Gui, ui: &mut Ui) {
                 if w::plain_button(ui, tr("Select safe")).on_hover_text(tr("Caches and data that is recreated automatically")).clicked() {
                     g.stale_checked = g.stale.iter().filter(|i| i.safety == DelSafety::Safe).map(|i| i.path.clone()).collect();
                 }
-            });
+            }
         });
         ui.label(
             RichText::new(tr("Not listed: photos, video and music, app data, cloud folders, system and protected places, and single files inside developer tools. “Opened” means the last time a file was read or changed."))
@@ -802,10 +815,10 @@ fn stale(g: &mut Gui, ui: &mut Ui) {
         .sense(Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::exact(28.0))
-        .column(Column::remainder().at_least(260.0).clip(true))
+        .column(Column::remainder().at_least(170.0).clip(true))
         .column(Column::exact(86.0))
-        .column(Column::exact(140.0))
-        .column(Column::exact(96.0))
+        .column(Column::exact(120.0))
+        .column(Column::exact(100.0))
         .header(24.0, |mut h| heads(&mut h, &["", tr("Item"), tr("Size"), tr("Not used for"), tr("Removal")]))
         .body(|body| {
             body.rows(44.0, g.stale.len(), |mut row| {
@@ -911,14 +924,13 @@ fn dupes(g: &mut Gui, ui: &mut Ui) {
         .collect();
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        w::split_row(ui, "disk_view.rs:913", |ui, right| {
+            if !right {
                 ui.label(
                     RichText::new(trf("{1}: {0}", &[&fmt::n(groups.len() as u64, fmt::Noun::DupGroup), &fmt::place(&ds.root)])).color(C::dim(ui)),
                 );
                 ui.label(RichText::new(trf("{0} can be freed", &[&fmt::bytes(wasted)])).metric().color(C::yellow()));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            } else {
                 let size: u64 = to_remove.iter().map(|(_, s)| s).sum();
                 if w::big_button(
                     ui,
@@ -943,7 +955,7 @@ fn dupes(g: &mut Gui, ui: &mut Ui) {
                 {
                     g.dupes_selected = groups.iter().filter(|gr| !gr.in_project).filter_map(|gr| gr.files.first().map(|f| f.path.clone())).collect();
                 }
-            });
+            }
         });
         ui.label(
             RichText::new(trf("Tick the groups to clean. One copy of each file is kept (the oldest, unless you choose another). Files are compared by content, not by name. Not searched: ~/Library, hidden folders, app bundles and files under {0} MB.", &[&g.settings.dupes_min_mb]))

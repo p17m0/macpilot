@@ -62,8 +62,8 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
     if g.app_updates.is_none() && std::env::var("MACPILOT_PAGE").is_ok_and(|p| p.ends_with(":check")) {
         g.check_app_updates();
     }
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
+    w::split_row(ui, "apps_view.rs:65", |ui, right| {
+        if !right {
             ui.set_max_width(ui.available_width() - 220.0);
             let status = match (&g.app_updates, g.app_updates_checking) {
                 (_, true) => tr("Checking…").to_string(),
@@ -79,14 +79,13 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
                 .callout()
                 .color(C::dim(ui)),
             );
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        } else {
             if g.app_updates_checking {
                 ui.spinner();
             } else if w::big_button(ui, tr("Check now"), C::accent(), true).clicked() {
                 g.check_app_updates();
             }
-        });
+        }
     });
     ui.add_space(w::sp::M);
     let Some(report) = g.app_updates.clone() else { return };
@@ -100,11 +99,11 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
     TableBuilder::new(ui)
         .striped(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::remainder().at_least(220.0).clip(true))
-        .column(Column::exact(110.0).clip(true))
-        .column(Column::exact(110.0).clip(true))
-        .column(Column::exact(110.0))
-        .column(Column::exact(170.0))
+        .column(Column::remainder().at_least(160.0).clip(true))
+        .column(Column::exact(96.0).clip(true))
+        .column(Column::exact(96.0).clip(true))
+        .column(Column::exact(100.0).clip(true))
+        .column(Column::exact(150.0))
         .header(24.0, |mut h| {
             for t in [tr("App"), tr("You have"), tr("Available"), tr("Source"), ""] {
                 h.col(|ui| {
@@ -176,10 +175,10 @@ fn installed(g: &mut Gui, ui: &mut Ui) {
         .striped(true)
         .sense(Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::remainder().at_least(240.0).clip(true))
-        .column(Column::exact(90.0))
-        .column(Column::exact(86.0))
-        .column(Column::exact(150.0))
+        .column(Column::remainder().at_least(170.0).clip(true))
+        .column(Column::exact(90.0).clip(true))
+        .column(Column::exact(80.0))
+        .column(Column::exact(130.0).clip(true))
         .column(Column::exact(90.0))
         .header(24.0, |mut h| {
             for t in [tr("App"), tr("Version"), tr("Size"), tr("Last opened"), ""] {
@@ -345,8 +344,8 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
     let all_chosen = !orphans.is_empty() && chosen.len() == orphans.len();
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        w::split_row(ui, "apps_view.rs:347", |ui, right| {
+            if !right {
                 ui.label(
                     RichText::new(trf(
                         "{0} of {1} that are no longer installed",
@@ -355,8 +354,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                     .color(C::dim(ui)),
                 );
                 ui.label(RichText::new(fmt::bytes(total)).metric().color(C::yellow()));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            } else {
                 if w::big_button(ui, &trf("Move {0} to Trash · {1}", &[&chosen.len(), &fmt::bytes(chosen_size)]), C::red(), !chosen.is_empty())
                     .clicked()
                 {
@@ -377,7 +375,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                 } else if w::plain_button(ui, tr("Select all")).clicked() {
                     g.orphans_checked = orphans.iter().map(|o| o.key().to_path_buf()).collect();
                 }
-            });
+            }
         });
         ui.label(
             RichText::new(tr("Found by bundle id in every place apps keep data in your Library (Containers, Application Support, Caches, Logs, Preferences, WebKit, cookies…) and by the app's name. Apple's data, installed apps and their helpers are skipped."))
@@ -396,9 +394,9 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
         .sense(Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::exact(28.0))
-        .column(Column::remainder().at_least(260.0).clip(true))
+        .column(Column::remainder().at_least(200.0).clip(true))
         .column(Column::exact(96.0))
-        .column(Column::exact(140.0))
+        .column(Column::exact(120.0))
         .header(24.0, |mut h| {
             for t in ["", tr("Belonged to"), tr("Size"), tr("Changed")] {
                 h.col(|ui| {
