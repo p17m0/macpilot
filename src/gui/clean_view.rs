@@ -242,7 +242,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                             toggle = Some(t.id);
                         }
                         resp.context_menu(|ui| {
-                            if t.cleanable() && ui.add_enabled(size_of(t) > 0, egui::Button::new(tr("Clean only this"))).clicked() {
+                            if t.cleanable() && w::add_button(ui, size_of(t) > 0, egui::Button::new(tr("Clean only this"))).clicked() {
                                 clean_now = Some(vec![i]);
                                 ui.close();
                             }

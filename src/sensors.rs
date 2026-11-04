@@ -139,17 +139,7 @@ unsafe impl Send for Smc {}
 impl Smc {
     /// `None` when the SMC is not available (virtual machines).
     pub fn open() -> Option<Smc> {
-        let service = unsafe { IOServiceGetMatchingService(0, IOServiceMatching(c"AppleSMC".as_ptr())) };
-        if service == 0 {
-            return None;
-        }
-        let mut conn = 0;
-        let r = unsafe { IOServiceOpen(service, mach_task_self(), 0, &mut conn) };
-        unsafe { IOObjectRelease(service) };
-        if r != 0 {
-            return None;
-        }
-        let mut smc = Smc { conn, cpu_keys: Vec::new(), gpu_keys: Vec::new(), fans: 0 };
+        let mut smc = Smc::connect()?;
         let count = smc.value(fourcc("#KEY")).unwrap_or(0.0) as u32;
         for i in 0..count.min(5000) {
             let mut q = blank();
@@ -165,6 +155,21 @@ impl Smc {
         }
         smc.fans = smc.value(fourcc("FNum")).unwrap_or(0.0) as usize;
         Some(smc)
+    }
+
+    /// A connection without the list of keys (for reading a few known ones).
+    fn connect() -> Option<Smc> {
+        let service = unsafe { IOServiceGetMatchingService(0, IOServiceMatching(c"AppleSMC".as_ptr())) };
+        if service == 0 {
+            return None;
+        }
+        let mut conn = 0;
+        let r = unsafe { IOServiceOpen(service, mach_task_self(), 0, &mut conn) };
+        unsafe { IOObjectRelease(service) };
+        if r != 0 {
+            return None;
+        }
+        Some(Smc { conn, cpu_keys: Vec::new(), gpu_keys: Vec::new(), fans: 0 })
     }
 
     fn call(&self, input: &KeyData) -> Option<KeyData> {
@@ -208,6 +213,13 @@ impl Smc {
             .collect();
         Sensors { cpu: median(cpu), cpu_max, gpu, fans }
     }
+}
+
+/// The battery's temperature, °C: the warmest of its SMC sensors (`TB0T`, `TB1T`, `TB2T`). Newer
+/// macOS versions no longer put it in the battery's registry entry. `None` without a battery sensor.
+pub fn battery_temperature() -> Option<f32> {
+    let smc = Smc::connect()?;
+    ["TB0T", "TB1T", "TB2T"].iter().filter_map(|k| smc.value(fourcc(k))).filter(|t| *t > 5.0 && *t < 90.0).reduce(f32::max)
 }
 
 impl Drop for Smc {

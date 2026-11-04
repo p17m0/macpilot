@@ -23,11 +23,11 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 <table>
   <tr>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/disk_map_dark.png"><img src="docs/screenshots/disk_map_light.png" alt="Disk map — what takes space"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/disk_summary_dark.png"><img src="docs/screenshots/disk_summary_light.png" alt="Disk summary — what takes space"></picture></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/battery_dark.png"><img src="docs/screenshots/battery_light.png" alt="Battery — health, history, energy use"></picture></td>
   </tr>
   <tr>
-    <td align="center"><sub>Disk map — what takes space</sub></td>
+    <td align="center"><sub>Disk — what takes space</sub></td>
     <td align="center"><sub>Battery — health, history, energy use</sub></td>
   </tr>
   <tr>
@@ -48,6 +48,11 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
   </tr>
 </table>
 
+<p align="center">
+  <img src="docs/screenshots/styles.png" width="860" alt="Styles: Classic Macintosh, Windows 98, Windows XP, Nintendo, Game Boy, PlayStation, PlayStation 2, iOS 6, iOS 7">
+  <br><sub>Ten color themes and nine retro styles: Classic Macintosh, Windows 98 and XP, Nintendo, Game Boy, PlayStation 1 and 2, iOS 6 and 7</sub>
+</p>
+
 ## Features
 
 **Overview.** CPU (with its temperature and fan speed), memory pressure, swap and disk at a glance, plus recommendations with one-click actions. For example: an app stuck spawning thousands of processes, known adware in your startup items, gigabytes of caches, or old build folders.
@@ -67,6 +72,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Cleanup.**
 - **System junk**: app caches, logs, Xcode data, iOS updates, Mail downloads, package-manager caches (npm, pnpm, Yarn, Cargo, Gradle, Homebrew…). You can also empty the Trash from here.
+- **One click**: the safe places are ticked from the start, and *Clean selected* moves them all to the Trash after one confirmation. **Quick cleanup** does the same from the Overview, the menu bar menu or ⇧⌘K on any page.
 - **History**: everything MacPilot moved to the Trash in the last 90 days, with *Put Back* while it is still there.
 - **On a schedule** (off by default, Settings → Disk and Cleanup): weekly or monthly, caches of apps that are not running, logs and previews go to the Trash on their own.
 - **Old installers**: disk images and packages (.dmg, .pkg…) forgotten in Downloads for more than a month.
@@ -80,11 +86,13 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Apps (drag and drop).** Drop any `.app` on the window to uninstall it with its leftovers, even from Downloads or a disk image. Drop a file or folder to find it on the Disk page.
 
-**Menu bar.** CPU and memory in the menu bar, with disk space, temperature, network traffic and the busiest app in its menu. Closing the window keeps MacPilot there; ⌘Q quits.
+**Activity.** A History page of everything MacPilot did on the Mac in the last 90 days: what went to the Trash, which processes it stopped, which startup items it switched. Kept on the Mac only.
+
+**Menu bar.** CPU and memory in the menu bar, with disk space, temperature, network traffic, the busiest app and *Quick cleanup…* in its menu. Closing the window keeps MacPilot there, and it slows its own checks down so that it stays out of the way (about 1% of one core); ⌘Q quits.
 
 **Fast start.** The last scan of your home folder is saved (a compact ~7 MB cache), so results appear instantly at launch while a fresh scan runs in the background.
 
-**Settings.** Style (standard or Classic Macintosh, each light or dark), language (English, Français, Español, Deutsch, Русский), appearance, open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
+**Settings.** Style (the standard one with ten color themes, or Classic Macintosh, Windows 98, Windows XP, Nintendo, Game Boy, PlayStation, PlayStation 2, iOS 6 and iOS 7), language (English, Français, Español, Deutsch, Русский), appearance, open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
 
 **Notifications.** Only for real problems: an app stuck spawning hundreds of processes, a nearly full disk, a hot battery, or an app draining the battery. A click opens the right page; you can turn them off in Settings.
 
@@ -122,7 +130,7 @@ MacPilot is built to be hard to misuse:
 ### Homebrew
 
 ```bash
-brew install --cask <you>/tap/macpilot
+brew install --cask p17m0/tap/macpilot
 ```
 
 This installs the app and the `macpilot` terminal command.
@@ -132,7 +140,7 @@ This installs the app and the `macpilot` terminal command.
 You need [Rust](https://rustup.rs) and the Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
-git clone https://github.com/<you>/macpilot.git
+git clone https://github.com/p17m0/macpilot.git
 cd macpilot
 ./install.sh
 ```

@@ -138,6 +138,13 @@ fn finish_button(ui: &Ui, r: &egui::Response) {
     }
 }
 
+/// `ui.add_enabled(enabled, button)` in the current style (the bevel of Windows 98).
+pub fn add_button(ui: &mut Ui, enabled: bool, button: egui::Button) -> egui::Response {
+    let r = ui.add_enabled(enabled, button);
+    finish_button(ui, &r);
+    r
+}
+
 /// A plain button in the current style. Use it instead of `ui.button`, which cannot draw bevels.
 pub fn button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> egui::Response {
     let r = ui.button(text);

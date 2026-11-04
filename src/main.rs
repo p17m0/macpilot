@@ -280,7 +280,9 @@ fn report_battery() {
         b.condition.as_deref().unwrap_or("—"),
         trf("{0} of {1} cycles", &[&b.cycles, &battery::RATED_CYCLES])
     );
-    println!("{}: {}", tr("Temperature"), fmt::celsius(b.temperature));
+    if b.temperature > 0.0 {
+        println!("{}: {}", tr("Temperature"), fmt::celsius(b.temperature));
+    }
     // Energy is a rate: two samples a second apart.
     let mut mon = procs::Monitor::new();
     std::thread::sleep(Duration::from_millis(1500));

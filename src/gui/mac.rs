@@ -174,8 +174,17 @@ pub fn quit() {
     }
 }
 
+/// Whether the window is open (not hidden to the menu bar). The background monitors slow down
+/// while it is not.
+static WINDOW_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn window_shown() -> bool {
+    WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Hide the window and the Dock icon; MacPilot keeps running in the menu bar.
 pub fn hide_window() {
+    WINDOW_SHOWN.store(false, std::sync::atomic::Ordering::Relaxed);
     let Some(mtm) = MainThreadMarker::new() else { return };
     let app = NSApplication::sharedApplication(mtm);
     for w in app.windows().iter() {
@@ -188,6 +197,7 @@ pub fn hide_window() {
 
 /// Bring the window back, with the Dock icon.
 pub fn show_window() {
+    WINDOW_SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
     let Some(mtm) = MainThreadMarker::new() else { return };
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);

@@ -406,7 +406,12 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
     egui::CentralPanel::default().frame(w::page_frame(ui)).show(ui, |ui| {
         w::centered(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                let host = sysinfo::System::host_name().unwrap_or_default();
+                // MACPILOT_HOST (developer screenshots): a neutral name instead of the real one.
+                let host = std::env::var("MACPILOT_HOST")
+                    .ok()
+                    .filter(|_| cfg!(feature = "dev-tools"))
+                    .or_else(sysinfo::System::host_name)
+                    .unwrap_or_default();
                 let os = sysinfo::System::long_os_version().unwrap_or_default();
                 w::header(ui, tr("Overview"), &format!("{host} · {os} · {}", trf("on for {0}", &[&fmt::duration(sysinfo::System::uptime())])));
 

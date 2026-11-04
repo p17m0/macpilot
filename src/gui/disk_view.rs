@@ -51,11 +51,15 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
 }
 
 fn header(g: &mut Gui, ui: &mut Ui) {
+    // Summary draws the whole disk itself: the bar here would say the same thing twice, and a card
+    // around the one line about the scan would stand there nearly empty.
+    if g.disk_mode == DiskMode::Summary {
+        scan_line(g, ui);
+        return;
+    }
     w::card(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        // Summary draws the whole disk itself; the bar here would say the same thing twice.
-        let disk = w::data_volume(&g.disks).filter(|_| g.disk_mode != DiskMode::Summary);
-        if let Some((avail, total)) = disk {
+        if let Some((avail, total)) = w::data_volume(&g.disks) {
             let used = total.saturating_sub(avail);
             let r = used as f32 / total.max(1) as f32;
             ui.horizontal(|ui| {
@@ -69,44 +73,49 @@ fn header(g: &mut Gui, ui: &mut Ui) {
             ui.label(RichText::new(trf("{0} of {1} used", &[&fmt::bytes(used), &fmt::bytes(total)])).color(C::dim(ui)));
         }
         ui.add_space(w::sp::S);
-        ui.horizontal_wrapped(|ui| match &g.scan {
-            Some(sc) => {
-                let files = sc.shared.files.load(Ordering::Relaxed);
-                let bytes = sc.shared.bytes.load(Ordering::Relaxed);
-                let errs = sc.shared.errors.load(Ordering::Relaxed);
-                if let Some(at) = sc.cached_at {
-                    let bytes = sc.dir(&sc.root).map(|d| d.size).unwrap_or(bytes);
-                    ui.label(trf(
-                        "{0}: {1}, {2} · last scan {3}",
-                        &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &fmt::ago(at)],
-                    ));
-                    if let Some(fresh) = &g.rescan {
-                        ui.spinner();
-                        let n = fresh.shared.files.load(Ordering::Relaxed);
-                        ui.label(RichText::new(trf("updating… {0}", &[&fmt::n(n, fmt::Noun::File)])).color(C::dim(ui)));
-                    }
-                } else if let Some(t) = sc.finished_in {
-                    ui.label(RichText::new("✔").color(C::green()));
-                    ui.label(trf(
-                        "Scanned {0}: {1}, {2}, {3} s",
-                        &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &format!("{:.1}", t.as_secs_f32())],
-                    ));
-                } else {
+        scan_line(g, ui);
+    });
+}
+
+/// "Home folder: 150 GB, 1 765 338 files · last scan just now", or the scan in progress.
+fn scan_line(g: &Gui, ui: &mut Ui) {
+    ui.horizontal_wrapped(|ui| match &g.scan {
+        Some(sc) => {
+            let files = sc.shared.files.load(Ordering::Relaxed);
+            let bytes = sc.shared.bytes.load(Ordering::Relaxed);
+            let errs = sc.shared.errors.load(Ordering::Relaxed);
+            if let Some(at) = sc.cached_at {
+                let bytes = sc.dir(&sc.root).map(|d| d.size).unwrap_or(bytes);
+                ui.label(trf(
+                    "{0}: {1}, {2} · last scan {3}",
+                    &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &fmt::ago(at)],
+                ));
+                if let Some(fresh) = &g.rescan {
                     ui.spinner();
-                    ui.label(trf("{0}: scanning… {1}, {2}", &[&fmt::place(&sc.root), &fmt::n(files, fmt::Noun::File), &fmt::bytes(bytes)]));
-                    if g.scan_stalled {
-                        ui.label(RichText::new(tr("· waiting for a macOS permission dialog")).color(C::yellow()));
-                    }
+                    let n = fresh.shared.files.load(Ordering::Relaxed);
+                    ui.label(RichText::new(trf("updating… {0}", &[&fmt::n(n, fmt::Noun::File)])).color(C::dim(ui)));
                 }
-                if errs > 0 {
-                    ui.label(RichText::new(trf("· no access: {0}", &[&fmt::n(errs, fmt::Noun::Folder)])).color(C::dim(ui)))
-                        .on_hover_text(tr("To see everything: System Settings → Privacy & Security → Full Disk Access → add MacPilot."));
+            } else if let Some(t) = sc.finished_in {
+                ui.label(RichText::new("✔").color(C::green()));
+                ui.label(trf(
+                    "Scanned {0}: {1}, {2}, {3} s",
+                    &[&fmt::place(&sc.root), &fmt::bytes(bytes), &fmt::n(files, fmt::Noun::File), &format!("{:.1}", t.as_secs_f32())],
+                ));
+            } else {
+                ui.spinner();
+                ui.label(trf("{0}: scanning… {1}, {2}", &[&fmt::place(&sc.root), &fmt::n(files, fmt::Noun::File), &fmt::bytes(bytes)]));
+                if g.scan_stalled {
+                    ui.label(RichText::new(tr("· waiting for a macOS permission dialog")).color(C::yellow()));
                 }
             }
-            None => {
-                ui.label(tr("Not scanned yet"));
+            if errs > 0 {
+                ui.label(RichText::new(trf("· no access: {0}", &[&fmt::n(errs, fmt::Noun::Folder)])).color(C::dim(ui)))
+                    .on_hover_text(tr("To see everything: System Settings → Privacy & Security → Full Disk Access → add MacPilot."));
             }
-        });
+        }
+        None => {
+            ui.label(tr("Not scanned yet"));
+        }
     });
 }
 
@@ -115,7 +124,7 @@ fn nav(g: &mut Gui, ui: &mut Ui) {
         let browsing = matches!(g.disk_mode, DiskMode::List | DiskMode::Map);
         if browsing {
             let up = g.cwd.parent().map(|p| p.to_path_buf());
-            if ui.add_enabled(up.is_some(), egui::Button::new(tr("‹ Up")).corner_radius(w::button_radius())).clicked() {
+            if w::add_button(ui, up.is_some(), egui::Button::new(tr("‹ Up")).corner_radius(w::button_radius())).clicked() {
                 if let Some(p) = up {
                     g.go(p);
                 }
@@ -304,7 +313,8 @@ fn list(g: &mut Gui, ui: &mut Ui) {
                         ui.close();
                     }
                     ui.separator();
-                    if ui.add_enabled(safety != DelSafety::Blocked, egui::Button::new(RichText::new(tr("Move to Trash…")).color(C::red()))).clicked()
+                    if w::add_button(ui, safety != DelSafety::Blocked, egui::Button::new(RichText::new(tr("Move to Trash…")).color(C::red())))
+                        .clicked()
                     {
                         trash = Some(p.clone());
                         ui.close();

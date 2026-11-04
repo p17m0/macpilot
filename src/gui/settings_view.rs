@@ -345,7 +345,7 @@ fn auto_clean(g: &mut Gui, ui: &mut Ui) {
         let mut run = false;
         row(ui, tr("It would take now"), &status, |ui| {
             let has = g.auto_preview.is_some_and(|p| p.0 > 0);
-            run = ui.add_enabled(has, egui::Button::new(tr("Run now…"))).clicked();
+            run = w::add_button(ui, has, egui::Button::new(tr("Run now…"))).clicked();
         });
         if run {
             g.ask_auto_clean_now();
@@ -448,7 +448,7 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
         }
         row(ui, tr("Check for updates"), &hint, |ui| {
             w::switch(ui, &mut on, tr("Check for updates"));
-            check = ui.add_enabled(!g.update_checking, egui::Button::new(tr("Check now"))).clicked();
+            check = w::add_button(ui, !g.update_checking, egui::Button::new(tr("Check now"))).clicked();
         });
     });
     if install {

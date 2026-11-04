@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.3
+
+- **Much lighter in the menu bar**: with the window closed MacPilot used about 3–7% of a core all day, because every monitor kept the window's pace (the process list every 1.5 s, `nettop` every 3 s, the battery every 5 s, `lsof` every 10 s). Hidden, it now reads processes every 10 s, network every 20 s, sensors every 15 s and the battery every 30 s, skips the open ports entirely, and does not lay out pages nobody sees — about 1%. Everything catches up within a quarter of a second when the window opens.
+- **Battery temperature** showed 0.0 °C on macOS 27, which no longer reports it in the battery's registry entry; it is now read from the battery's own sensors, and shown as "—" where there is none.
+- **Homebrew works**: `brew install --cask p17m0/tap/macpilot`. The cask has the real address and checksum; every release attaches it filled in, and pushes it to the tap when the `HOMEBREW_TAP_TOKEN` secret is set (see docs/RELEASING.md).
+- **README**: new screenshots (Activity, Quick cleanup, the new icon), a picture of all the styles, and the features added since 0.7: Quick cleanup, the History page, themes and retro styles.
+- Disk → Summary no longer starts with a nearly empty card: the scan line stands on its own.
+- Windows 98: the remaining buttons (Check now, Run now…, Clear history, Up, the confirmation dialog) have the 3D bevel too.
+- CI takes screenshots of every page in every style at the smallest window (`scripts/screenshots.sh`) and keeps them as a build artifact.
+
 ## 0.8.2
 
 - **Fixes for narrow windows** (the smallest window, or any with the side panel open):

@@ -24,6 +24,7 @@ pub struct Battery {
     /// Power flowing out of (negative) or into (positive) the battery, watts.
     pub watts: f32,
     pub voltage: f32,
+    /// °C; 0 when the Mac does not report it.
     pub temperature: f32,
     pub cycles: u32,
     pub design_mah: u32,
@@ -119,6 +120,10 @@ pub fn read() -> Option<Battery> {
         let mut w = l.split_whitespace();
         matches!((w.next(), w.next()), (Some("lowpowermode" | "powermode"), Some("1")))
     });
+    // macOS 27 dropped "Temperature" from the registry entry: ask the battery's own sensors.
+    if b.temperature <= 0.0 {
+        b.temperature = crate::sensors::battery_temperature().unwrap_or(0.0);
+    }
     Some(b)
 }
 

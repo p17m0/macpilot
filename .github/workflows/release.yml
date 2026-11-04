@@ -21,6 +21,7 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,6 +63,9 @@ jobs:
             echo "NOTES=dist/notes.md" >> "$GITHUB_ENV"
           fi
 
+      - name: Homebrew cask
+        run: scripts/cask.sh "$GITHUB_REF_NAME" > dist/macpilot.rb
+
       - uses: softprops/action-gh-release@v2
         with:
           body_path: ${{ env.NOTES }}
@@ -71,3 +75,19 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
             dist/SHA256SUMS.txt
+            dist/macpilot.rb
+
+      # Optional: with a HOMEBREW_TAP_TOKEN secret (a token that may push to the tap repository),
+      # the new cask goes straight to github.com/<owner>/homebrew-tap. See docs/RELEASING.md.
+      - name: Update the Homebrew tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        run: |
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/homebrew-tap.git" "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Casks"
+          cp dist/macpilot.rb "$RUNNER_TEMP/tap/Casks/macpilot.rb"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/macpilot.rb
+          git commit -m "MacPilot ${GITHUB_REF_NAME#v}" || exit 0
+          git push

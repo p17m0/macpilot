@@ -366,7 +366,8 @@ impl Gui {
             std::thread::spawn(move || {
                 let mut mon = first;
                 loop {
-                    std::thread::sleep(Duration::from_millis(1500));
+                    // Hidden, only the menu bar (CPU, memory, the busiest app) and the alerts read it.
+                    nap(Duration::from_millis(1500), Duration::from_secs(10));
                     mon.refresh();
                     *shared.lock().unwrap() = Arc::new(mon.snap.clone());
                     ctx.request_repaint();
@@ -382,7 +383,8 @@ impl Gui {
                 loop {
                     let p = procs::listening_ports();
                     *ports.lock().unwrap() = p;
-                    std::thread::sleep(Duration::from_secs(10));
+                    // Only the Processes page shows them: `lsof` waits for the window.
+                    nap(Duration::from_secs(10), Duration::MAX);
                 }
             });
         }
@@ -419,7 +421,8 @@ impl Gui {
                 loop {
                     let rates = meter.sample();
                     *net.lock().unwrap() = Arc::new(rates);
-                    std::thread::sleep(Duration::from_secs(3));
+                    // Hidden, only the total in the menu bar menu needs it.
+                    nap(Duration::from_secs(3), Duration::from_secs(20));
                 }
             });
         }
@@ -432,7 +435,7 @@ impl Gui {
                 let Some(smc) = macpilot::sensors::Smc::open() else { return };
                 loop {
                     *sensors.lock().unwrap() = Some(smc.read());
-                    std::thread::sleep(Duration::from_secs(3));
+                    nap(Duration::from_secs(3), Duration::from_secs(15));
                 }
             });
         }
@@ -468,7 +471,8 @@ impl Gui {
                     if !has && i > 0 {
                         break; // no battery: nothing will change
                     }
-                    std::thread::sleep(Duration::from_secs(5));
+                    // Hidden, the battery alerts (hot, draining) still need it, just not as often.
+                    nap(Duration::from_secs(5), Duration::from_secs(30));
                 }
             });
         }
@@ -610,6 +614,10 @@ impl Gui {
     fn dev_setup(&mut self) {
         if let Ok(p) = std::env::var("MACPILOT_SHOT") {
             self.shot = Some(Shot { path: PathBuf::from(p), started: Instant::now(), requested: false, sent: false });
+        }
+        // MACPILOT_HIDDEN=1: start in the menu bar, as after closing the window (to measure idle use).
+        if std::env::var("MACPILOT_HIDDEN").is_ok() {
+            mac::hide_window();
         }
         if let Ok(st) = std::env::var("MACPILOT_STYLE") {
             self.settings.style = macpilot::settings::UiStyle::from_code(&st).unwrap_or(macpilot::settings::UiStyle::Standard);
@@ -806,7 +814,9 @@ impl Gui {
         if due && self.settings.check_updates && macpilot::update::repo().is_some() {
             self.check_updates();
         }
-        ctx.request_repaint_after(Duration::from_millis(1000));
+        // In the menu bar only the menu bar item and the alerts need the clock, and they are fine
+        // with a tick every few seconds (the monitors wake the app when they have something new).
+        ctx.request_repaint_after(if mac::window_shown() { Duration::from_millis(1000) } else { Duration::from_secs(5) });
     }
 
     fn on_msg(&mut self, m: Msg) {
@@ -1795,7 +1805,8 @@ impl Gui {
             || self.app_updates_checking
             || self.orphans.is_none()
             || self.startup.is_none()
-            || self.targets.iter().any(|t| t.stat.is_none() && disk::present(&t.path));
+            // Without the permission to read files nothing gets measured: do not wait for it.
+            || (self.settings.file_access && self.targets.iter().any(|t| t.stat.is_none() && disk::present(&t.path)));
         if std::env::var("MACPILOT_DEBUG").is_ok() && busy {
             let waiting: Vec<&str> = self.targets.iter().filter(|t| t.stat.is_none() && disk::present(&t.path)).map(|t| t.id).collect();
             eprintln!(
@@ -1856,6 +1867,22 @@ pub fn apply_theme(ctx: &egui::Context, t: Theme, style: macpilot::settings::UiS
     });
 }
 
+/// Sleep `shown` while the window is open and `hidden` while MacPilot sits in the menu bar — and
+/// wake up within a quarter of a second when the window opens again, so nothing on screen is stale.
+/// Each reading spawns a process or walks every process, so a menu bar app that sat idle all day
+/// used ~3% CPU when every monitor kept the window's pace.
+fn nap(shown: Duration, hidden: Duration) {
+    let start = Instant::now();
+    loop {
+        let want = if mac::window_shown() { shown } else { hidden };
+        let left = want.saturating_sub(start.elapsed());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(250)));
+    }
+}
+
 fn push_hist(h: &mut VecDeque<f32>, v: f32) {
     h.push_back(v);
     while h.len() > 60 {
@@ -1874,6 +1901,12 @@ impl eframe::App for Gui {
         self.handle_shot(&ctx);
 
         self.handle_drop(&ctx);
+
+        // Hidden to the menu bar: nobody sees the pages, so they are not laid out at all (the
+        // Processes table alone is hundreds of rows). `logic` above keeps the menu and alerts going.
+        if !mac::window_shown() {
+            return;
+        }
 
         // With the menu bar item on, closing the window keeps MacPilot running there (⌘Q quits).
         if self.settings.menu_bar && ctx.input(|i| i.viewport().close_requested()) {
@@ -2081,10 +2114,10 @@ impl Gui {
                     let fill = if c.danger { C::red() } else { C::accent() };
                     let btn =
                         egui::Button::new(RichText::new(&c.button).semibold().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(120.0, 30.0));
-                    if ui.add_enabled(ok_enabled, btn).clicked() {
+                    if widgets::add_button(ui, ok_enabled, btn).clicked() {
                         decision = Some(true);
                     }
-                    if ui.add(egui::Button::new(tr("Cancel")).min_size(egui::vec2(90.0, 30.0))).clicked() {
+                    if widgets::add_button(ui, true, egui::Button::new(tr("Cancel")).min_size(egui::vec2(90.0, 30.0))).clicked() {
                         decision = Some(false);
                     }
                 });

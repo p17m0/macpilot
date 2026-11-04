@@ -85,7 +85,8 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     } else {
                         0.1
                     };
-                    stat_card(&mut cols[3], tr("Temperature"), fmt::celsius(b.temperature), tr("of the battery").into(), hot, None);
+                    let temp = if b.temperature > 0.0 { fmt::celsius(b.temperature) } else { "—".into() };
+                    stat_card(&mut cols[3], tr("Temperature"), temp, tr("of the battery").into(), hot, None);
                 });
 
                 ui.add_space(w::sp::M);

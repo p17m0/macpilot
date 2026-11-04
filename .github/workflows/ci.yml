@@ -25,3 +25,20 @@ jobs:
         run: cargo test
       - name: Build the app
         run: scripts/bundle.sh
+
+  # Every page in every style at the smallest window size, kept as a build artifact: a look at
+  # them catches buttons drawn over text or cut-off columns before a release.
+  screenshots:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Screenshots
+        run: scripts/screenshots.sh target/screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: target/screenshots/*.png
+          retention-days: 14

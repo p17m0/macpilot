@@ -79,11 +79,14 @@ xcrun stapler validate dist/MacPilot-v0.2.0.dmg
 
 ## Homebrew
 
-`packaging/homebrew/macpilot.rb` is a ready-made cask:
+`packaging/homebrew/macpilot.rb` is the cask. Every release attaches it, filled in for that
+release (`scripts/cask.sh` sets `version` and `sha256`), as `macpilot.rb`.
 
-1. Create a public repository named `homebrew-tap`.
-2. Copy the file to `Casks/macpilot.rb` in it.
-3. Replace `OWNER` with your GitHub user name.
-4. On each release, set `version` and `sha256`. The value for `sha256` is the zip's line in `SHA256SUMS.txt`.
+To publish it once and keep it current by itself:
 
-Users then install MacPilot with `brew install --cask OWNER/tap/macpilot`. This installs both the app and the `macpilot` command.
+1. Create a public repository named `homebrew-tap` (github.com/<owner>/homebrew-tap).
+2. Create a fine-grained token with **Contents: read and write** on that repository only, and add it
+   to this repository as the secret `HOMEBREW_TAP_TOKEN`.
+3. The next release pushes `Casks/macpilot.rb` to the tap.
+
+Users then install MacPilot with `brew install --cask <owner>/tap/macpilot`. This installs both the app and the `macpilot` command.
