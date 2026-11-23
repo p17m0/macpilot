@@ -12,6 +12,36 @@ pub enum Theme {
     Dark,
 }
 
+/// A value the menu bar item can show next to its icon.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BarItem {
+    Cpu,
+    Memory,
+    Disk,
+    Network,
+    Temperature,
+    Battery,
+}
+
+impl BarItem {
+    pub const ALL: [BarItem; 6] = [BarItem::Cpu, BarItem::Memory, BarItem::Disk, BarItem::Network, BarItem::Temperature, BarItem::Battery];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            BarItem::Cpu => "cpu",
+            BarItem::Memory => "memory",
+            BarItem::Disk => "disk",
+            BarItem::Network => "network",
+            BarItem::Temperature => "temperature",
+            BarItem::Battery => "battery",
+        }
+    }
+
+    pub fn from_code(s: &str) -> Option<BarItem> {
+        BarItem::ALL.into_iter().find(|b| b.code() == s)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     /// `None` = follow the macOS language.
@@ -27,6 +57,8 @@ pub struct Settings {
     pub scan_on_start: bool,
     /// Show CPU and memory in the menu bar; closing the window keeps MacPilot running there.
     pub menu_bar: bool,
+    /// What the menu bar item shows next to its icon, in this order (none: the icon alone).
+    pub bar_items: Vec<BarItem>,
     /// Look for a newer release on GitHub once a day.
     pub check_updates: bool,
     /// macOS notifications about problems (a stuck app, a full disk, the battery).
@@ -51,6 +83,7 @@ impl Default for Settings {
             dupes_min_mb: 1,
             scan_on_start: true,
             menu_bar: true,
+            bar_items: vec![BarItem::Cpu, BarItem::Memory],
             check_updates: true,
             notifications: true,
             auto_clean_days: 0,
@@ -92,6 +125,7 @@ impl Settings {
                 "dupes_min_mb" => s.dupes_min_mb = v.parse().unwrap_or(s.dupes_min_mb),
                 "scan_on_start" => s.scan_on_start = v != "false",
                 "menu_bar" => s.menu_bar = v != "false",
+                "bar_items" => s.bar_items = v.split(',').filter_map(|c| BarItem::from_code(c.trim())).collect(),
                 "check_updates" => s.check_updates = v != "false",
                 "notifications" => s.notifications = v != "false",
                 "auto_clean_days" => s.auto_clean_days = v.parse().unwrap_or(0),
@@ -113,13 +147,14 @@ impl Settings {
             Theme::Dark => "dark",
         };
         let text = format!(
-            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\ncheck_updates = {}\nnotifications = {}\nauto_clean_days = {}\nauto_clean_last = {}\nfile_access = {}\n{}",
+            "# MacPilot settings\nlang = {}\ntheme = {theme}\nstale_days = {}\njunk_days = {}\ndupes_min_mb = {}\nscan_on_start = {}\nmenu_bar = {}\nbar_items = {}\ncheck_updates = {}\nnotifications = {}\nauto_clean_days = {}\nauto_clean_last = {}\nfile_access = {}\n{}",
             self.lang.map(|l| l.code()).unwrap_or("system"),
             self.stale_days,
             self.junk_days,
             self.dupes_min_mb,
             self.scan_on_start,
             self.menu_bar,
+            self.bar_items.iter().map(|b| b.code()).collect::<Vec<_>>().join(","),
             self.check_updates,
             self.notifications,
             self.auto_clean_days,
@@ -174,6 +209,14 @@ pub fn shorten(p: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bar_items_codes() {
+        for b in BarItem::ALL {
+            assert_eq!(BarItem::from_code(b.code()), Some(b));
+        }
+        assert_eq!(BarItem::from_code("nope"), None);
+    }
 
     #[test]
     fn excluded_folders_round_trip() {

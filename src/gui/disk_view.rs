@@ -167,9 +167,9 @@ fn mode_switch(g: &mut Gui, ui: &mut Ui) {
         ui,
         &mut g.disk_mode,
         &[
-            (DiskMode::Summary, tr("Summary")),
-            (DiskMode::List, tr("List")),
             (DiskMode::Map, tr("Map")),
+            (DiskMode::List, tr("List")),
+            (DiskMode::Summary, tr("Summary")),
             (DiskMode::Big, tr("Large files")),
             (DiskMode::Stale, tr("Not used")),
             (DiskMode::Dupes, tr("Duplicates")),

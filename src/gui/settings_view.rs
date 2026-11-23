@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, RichText, Ui};
 use macpilot::i18n::Lang;
-use macpilot::settings::Theme;
+use macpilot::settings::{BarItem, Theme};
 use macpilot::{tr, trf};
 
 use crate::widgets::{self as w, C, Level, Txt};
@@ -184,6 +184,28 @@ fn behaviour(g: &mut Gui, ui: &mut Ui) {
     if bar != g.settings.menu_bar {
         g.settings.menu_bar = bar;
         g.save_settings();
+    }
+    if g.settings.menu_bar {
+        let mut items = g.settings.bar_items.clone();
+        row(ui, tr("Next to the icon"), tr("What the menu bar shows. Nothing ticked: just the icon."), |ui| {
+            // The row is laid out from the right: add the boxes reversed, so they read in order.
+            for b in BarItem::ALL.into_iter().rev() {
+                let mut on = items.contains(&b);
+                if w::check_label(ui, &mut on, bar_item_name(b)).changed() {
+                    if on {
+                        items.push(b);
+                    } else {
+                        items.retain(|x| *x != b);
+                    }
+                }
+            }
+        });
+        if items != g.settings.bar_items {
+            // Shown in a fixed order, whatever order they were ticked in.
+            items.sort_by_key(|b| BarItem::ALL.iter().position(|x| x == b));
+            g.settings.bar_items = items;
+            g.save_settings();
+        }
     }
 
     let mut notes = g.settings.notifications;
@@ -409,5 +431,16 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
     if on != g.settings.check_updates {
         g.settings.check_updates = on;
         g.save_settings();
+    }
+}
+
+fn bar_item_name(b: BarItem) -> &'static str {
+    match b {
+        BarItem::Cpu => "CPU",
+        BarItem::Memory => tr("Memory"),
+        BarItem::Disk => tr("Disk"),
+        BarItem::Network => tr("Network"),
+        BarItem::Temperature => tr("Temperature"),
+        BarItem::Battery => tr("Battery"),
     }
 }

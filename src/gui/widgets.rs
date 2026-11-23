@@ -791,36 +791,43 @@ impl egui::Widget for Check<'_> {
         }
         let on = *self.0;
         resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), on, ""));
-        let p = ui.painter();
-        let r = rect.shrink(1.0);
-        let fade = |c: Color32| if ui.is_enabled() { c } else { c.gamma_multiply(0.4) };
-        if on {
-            p.rect_filled(r, 5, fade(C::accent()));
-            let c = r.center();
-            let pts = vec![c + Vec2::new(-4.0, 0.2), c + Vec2::new(-1.2, 3.0), c + Vec2::new(4.2, -2.8)];
-            p.add(egui::Shape::line(pts, Stroke::new(2.0, fade(Color32::WHITE))));
-        } else {
-            let edge = if resp.hovered() { C::accent() } else { C::dim(ui) };
-            p.rect_filled(r, 5, C::card(ui));
-            p.rect_stroke(r, 5, Stroke::new(1.5, fade(edge)), egui::StrokeKind::Inside);
-        }
+        paint_check(ui, rect, on, resp.hovered());
         resp
     }
 }
 
-/// [`Check`] with its label; clicking the label ticks it too.
+fn paint_check(ui: &Ui, rect: Rect, on: bool, hovered: bool) {
+    let p = ui.painter();
+    let r = rect.shrink(1.0);
+    let fade = |c: Color32| if ui.is_enabled() { c } else { c.gamma_multiply(0.4) };
+    if on {
+        p.rect_filled(r, 5, fade(C::accent()));
+        let c = r.center();
+        let pts = vec![c + Vec2::new(-4.0, 0.2), c + Vec2::new(-1.2, 3.0), c + Vec2::new(4.2, -2.8)];
+        p.add(egui::Shape::line(pts, Stroke::new(2.0, fade(Color32::WHITE))));
+    } else {
+        let edge = if hovered { C::accent() } else { C::dim(ui) };
+        p.rect_filled(r, 5, C::card(ui));
+        p.rect_stroke(r, 5, Stroke::new(1.5, fade(edge)), egui::StrokeKind::Inside);
+    }
+}
+
+/// [`Check`] with its label after it, as one widget: clicking the label ticks it too, and the
+/// two keep their order in right-to-left rows.
 pub fn check_label(ui: &mut Ui, on: &mut bool, text: &str) -> egui::Response {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let mut r = ui.add(Check(on));
-        let l = ui.add(egui::Label::new(text).sense(Sense::click()));
-        if l.clicked() {
-            *on = !*on;
-            r.mark_changed();
-        }
-        r | l
-    })
-    .inner
+    let galley = ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(ty::BODY), C::text(ui));
+    let size = Vec2::new(18.0 + 6.0 + galley.size().x, 18.0_f32.max(galley.size().y));
+    let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let state = *on;
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), state, text));
+    let boxr = Rect::from_min_size(Pos2::new(rect.left(), rect.center().y - 9.0), Vec2::splat(18.0));
+    paint_check(ui, boxr, *on, resp.hovered());
+    ui.painter().galley(Pos2::new(boxr.right() + 6.0, rect.center().y - galley.size().y / 2.0), galley, C::text(ui));
+    resp
 }
 
 /// Fill of a meter: the accent while all is well, yellow and red only when something needs attention.

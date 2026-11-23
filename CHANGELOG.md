@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1
+
+- Disk opens on the Map, now the first of its sections: where the space went, at a glance.
+- **Menu bar**: choose what it shows next to the icon — CPU, memory, free space, network, temperature, battery, or nothing (Settings → General → Next to the icon). The digits keep one width, so the item does not twitch. Its menu lists the three busiest apps, each with Quit (like ⌘Q) and Show in MacPilot; parts of macOS are never offered.
+
 ## 0.9.0
 
 - **Light and dark only**: the retro styles (Classic Macintosh, Windows 98 and XP, Nintendo, Game Boy, PlayStation 1 and 2, iOS 6 and 7) and the ten color palettes are gone — one clean look, light, dark or as in macOS. A style chosen earlier is simply forgotten.

@@ -31,6 +31,17 @@ define_class!(
             show_window();
         }
 
+        #[unsafe(method(quitTopApp:))]
+        fn quit_top_app(&self, sender: Option<&AnyObject>) {
+            set_top_app_choice(sender, true);
+        }
+
+        #[unsafe(method(showTopApp:))]
+        fn show_top_app(&self, sender: Option<&AnyObject>) {
+            set_top_app_choice(sender, false);
+            show_window();
+        }
+
         #[unsafe(method(quitApp:))]
         fn quit_app(&self, _sender: Option<&AnyObject>) {
             if let Some(mtm) = MainThreadMarker::new() {
@@ -48,10 +59,31 @@ pub fn take_quick_clean() -> bool {
     QUICK_CLEAN.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// An app chosen in the menu bar menu: its row (the item's tag) and whether to quit it; -1 for none.
+static TOP_APP: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
+
+fn set_top_app_choice(sender: Option<&AnyObject>, quit: bool) {
+    let Some(sender) = sender else { return };
+    let tag: isize = unsafe { msg_send![sender, tag] };
+    if tag >= 0 {
+        TOP_APP.store(tag * 2 + isize::from(quit), std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The app of the menu bar menu chosen since the last call: (its row in `StatusInfo::apps`, quit?).
+/// `false` means "show it in MacPilot".
+pub fn take_top_app() -> Option<(usize, bool)> {
+    let v = TOP_APP.swap(-1, std::sync::atomic::Ordering::Relaxed);
+    (v >= 0).then_some(((v / 2) as usize, v % 2 == 1))
+}
+
 struct StatusMenu {
     item: Retained<NSStatusItem>,
     /// Read-only lines at the top of the menu (CPU, memory, disk…).
     lines: Vec<Retained<NSMenuItem>>,
+    /// The busiest apps: a header, then one item each with "Quit" and "Show in MacPilot" in a submenu.
+    apps_header: Retained<NSMenuItem>,
+    apps: Vec<(Retained<NSMenuItem>, Retained<NSMenuItem>, Retained<NSMenuItem>)>,
     clean: Retained<NSMenuItem>,
     open: Retained<NSMenuItem>,
     quit: Retained<NSMenuItem>,
@@ -78,6 +110,11 @@ pub struct StatusInfo<'a> {
     /// Shown on hover, so it is clear the item belongs to MacPilot.
     pub tooltip: &'a str,
     pub lines: &'a [String],
+    /// Header over the busiest apps, and each one's line ("Firefox — 23 %").
+    pub apps_title: &'a str,
+    pub apps: &'a [String],
+    pub quit_app_label: &'a str,
+    pub show_app_label: &'a str,
     pub clean_label: &'a str,
     pub open_label: &'a str,
     pub quit_label: &'a str,
@@ -95,7 +132,7 @@ pub fn set_status(info: Option<StatusInfo>) {
             return;
         };
         // Rebuild when the number of lines changes; otherwise only retitle.
-        if cur.as_ref().is_some_and(|s| s.lines.len() != info.lines.len()) {
+        if cur.as_ref().is_some_and(|s| s.lines.len() != info.lines.len() || s.apps.len() != info.apps.len()) {
             if let Some(s) = cur.take() {
                 NSStatusBar::systemStatusBar().removeStatusItem(&s.item);
             }
@@ -112,6 +149,27 @@ pub fn set_status(info: Option<StatusInfo>) {
                 lines.push(l);
             }
             menu.addItem(&NSMenuItem::separatorItem(mtm));
+            let apps_header = menu_item(mtm, "", None, "");
+            apps_header.setEnabled(false);
+            let mut apps = Vec::new();
+            if !info.apps.is_empty() {
+                menu.addItem(&apps_header);
+                for i in 0..info.apps.len() {
+                    let row = menu_item(mtm, "", None, "");
+                    let sub = NSMenu::new(mtm);
+                    let quit = menu_item(mtm, "", Some(sel!(quitTopApp:)), "");
+                    let show = menu_item(mtm, "", Some(sel!(showTopApp:)), "");
+                    for x in [&quit, &show] {
+                        x.setTag(i as isize);
+                        unsafe { x.setTarget(Some(&target)) };
+                        sub.addItem(x);
+                    }
+                    row.setSubmenu(Some(&sub));
+                    menu.addItem(&row);
+                    apps.push((row, quit, show));
+                }
+                menu.addItem(&NSMenuItem::separatorItem(mtm));
+            }
             let clean = menu_item(mtm, info.clean_label, Some(sel!(quickClean:)), "");
             let open = menu_item(mtm, info.open_label, Some(sel!(openWindow:)), "");
             let quit = menu_item(mtm, info.quit_label, Some(sel!(quitApp:)), "q");
@@ -132,7 +190,15 @@ pub fn set_status(info: Option<StatusInfo>) {
                     b.setImagePosition(NSCellImagePosition::ImageLeading);
                 }
             }
-            *cur = Some(StatusMenu { item, lines, clean, open, quit, _target: target, title: String::new() });
+            if let Some(b) = item.button(mtm) {
+                // Digits of one width: the item does not twitch as the numbers change.
+                let size = objc2_app_kit::NSFont::systemFontSize();
+                // (Called by name: the typed binding needs a feature for the weight type.)
+                let font: Option<Retained<objc2_app_kit::NSFont>> =
+                    unsafe { msg_send![<objc2_app_kit::NSFont as objc2::ClassType>::class(), monospacedDigitSystemFontOfSize: size, weight: 0.0f64] };
+                b.setFont(font.as_deref());
+            }
+            *cur = Some(StatusMenu { item, lines, apps_header, apps, clean, open, quit, _target: target, title: String::new() });
         }
         let s = cur.as_mut().expect("status menu");
         if s.title != info.title {
@@ -146,6 +212,12 @@ pub fn set_status(info: Option<StatusInfo>) {
         }
         for (item, text) in s.lines.iter().zip(info.lines) {
             item.setTitle(&ns(text));
+        }
+        s.apps_header.setTitle(&ns(info.apps_title));
+        for ((row, quit, show), text) in s.apps.iter().zip(info.apps) {
+            row.setTitle(&ns(text));
+            quit.setTitle(&ns(info.quit_app_label));
+            show.setTitle(&ns(info.show_app_label));
         }
         s.clean.setTitle(&ns(info.clean_label));
         s.open.setTitle(&ns(info.open_label));

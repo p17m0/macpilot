@@ -29,7 +29,7 @@ use macpilot::devjunk::Junk;
 use macpilot::disk::{self, DirStat, Entry, Scan, StaleItem};
 use macpilot::dupes::DupScan;
 use macpilot::procs::{self, Monitor, Snapshot};
-use macpilot::settings::{Settings, Theme};
+use macpilot::settings::{BarItem, Settings, Theme};
 use macpilot::startup::StartupItem;
 use macpilot::{fmt, tr, trf};
 
@@ -319,6 +319,8 @@ pub struct Gui {
     pub full_disk_access: bool,
     /// Menu bar item: when it was last updated.
     last_status: Option<Instant>,
+    /// The apps listed in the menu bar menu, in its order: (bundle, its processes, group key).
+    menu_apps: Vec<(PathBuf, Vec<u32>, String)>,
     /// Notifications: when each kind was last sent, and when the rules last ran.
     notified: HashMap<String, Instant>,
     last_alert_check: Instant,
@@ -552,7 +554,8 @@ impl Gui {
             entries_err: None,
             last_list: Instant::now() - Duration::from_secs(60),
             disk_sel: None,
-            disk_mode: DiskMode::List,
+            // The map shows at a glance where the space went.
+            disk_mode: DiskMode::Map,
             big: Vec::new(),
             path_input: fmt::path(&home),
             stale_days,
@@ -583,6 +586,7 @@ impl Gui {
                 autostart::enabled()
             },
             last_status: None,
+            menu_apps: Vec::new(),
             notified: HashMap::new(),
             last_alert_check: Instant::now(),
             update: None,
@@ -1663,11 +1667,44 @@ impl Gui {
         } else {
             lines.push(tr("Nothing is using much CPU").to_string());
         }
-        let title = trf("CPU {0} · RAM {1}", &[&format!("{:.0}%", s.cpu_total), &format!("{:.0}%", mem_r * 100.0)]);
+        // The busiest apps the user may quit (not macOS parts, not MacPilot).
+        let mut groups: Vec<_> = s.groups().into_iter().filter(|g| g.safety == procs::Safety::User && g.app.is_some()).collect();
+        groups.sort_by(|a, b| b.cpu.total_cmp(&a.cpu));
+        groups.truncate(3);
+        let apps: Vec<String> = groups.iter().map(|g| format!("{} — {}", g.label, fmt::pct(g.cpu))).collect();
+        self.menu_apps = groups.into_iter().filter_map(|g| Some((g.app?, g.pids, g.key))).collect();
+        let mut parts = Vec::new();
+        for item in &self.settings.bar_items {
+            match item {
+                BarItem::Cpu => parts.push(format!("CPU {:.0}%", s.cpu_total)),
+                BarItem::Memory => parts.push(format!("RAM {:.0}%", mem_r * 100.0)),
+                BarItem::Disk => {
+                    if let Some((avail, _)) = widgets::data_volume(&self.disks) {
+                        parts.push(format!("SSD {}", fmt::bytes(avail)));
+                    }
+                }
+                BarItem::Network => parts.push(format!("↓{}", fmt::rate(down))),
+                BarItem::Temperature => {
+                    if let Some(t) = self.sensors.lock().unwrap().as_ref().and_then(|x| x.cpu) {
+                        parts.push(fmt::temp(t));
+                    }
+                }
+                BarItem::Battery => {
+                    if let Some(b) = self.power.lock().unwrap().battery() {
+                        parts.push(format!("BAT {}%", b.percent));
+                    }
+                }
+            }
+        }
+        let title = parts.join(" · ");
         mac::set_status(Some(mac::StatusInfo {
             title: &title,
             tooltip: tr("MacPilot — CPU and memory use"),
             lines: &lines,
+            apps_title: tr("Busiest apps"),
+            apps: &apps,
+            quit_app_label: tr("Quit"),
+            show_app_label: tr("Show in MacPilot"),
             clean_label: tr("Quick cleanup…"),
             open_label: tr("Open MacPilot"),
             quit_label: tr("Quit MacPilot"),
@@ -1940,6 +1977,18 @@ impl eframe::App for Gui {
                 quick = i.modifiers.shift && i.key_pressed(egui::Key::K);
             }
         });
+        if let Some((i, quit)) = mac::take_top_app() {
+            if let Some((app, pids, key)) = self.menu_apps.get(i).cloned() {
+                if quit {
+                    let main_pid = pids.iter().copied().find(|p| self.snap.get(*p).is_some_and(|x| x.is_main_app));
+                    self.execute(Action::QuitApp { app, main_pid });
+                } else {
+                    self.view = ProcView::Apps;
+                    self.sel = Some(Sel::Group(key));
+                    self.go_page(Page::Procs);
+                }
+            }
+        }
         if (quick || mac::take_quick_clean()) && self.confirm.is_none() {
             self.quick_clean();
         }
