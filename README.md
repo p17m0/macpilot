@@ -48,11 +48,6 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
   </tr>
 </table>
 
-<p align="center">
-  <img src="docs/screenshots/styles.png" width="860" alt="Styles: Classic Macintosh, Windows 98, Windows XP, Nintendo, Game Boy, PlayStation, PlayStation 2, iOS 6, iOS 7">
-  <br><sub>Ten color themes and nine retro styles: Classic Macintosh, Windows 98 and XP, Nintendo, Game Boy, PlayStation 1 and 2, iOS 6 and 7</sub>
-</p>
-
 ## Features
 
 **Overview.** CPU (with its temperature and fan speed), memory pressure, swap and disk at a glance, plus recommendations with one-click actions. For example: an app stuck spawning thousands of processes, known adware in your startup items, gigabytes of caches, or old build folders.
@@ -92,7 +87,7 @@ MacPilot brings together the most useful parts of disk analyzers, cleaners, unin
 
 **Fast start.** The last scan of your home folder is saved (a compact ~7 MB cache), so results appear instantly at launch while a fresh scan runs in the background.
 
-**Settings.** Style (the standard one with ten color themes, or Classic Macintosh, Windows 98, Windows XP, Nintendo, Game Boy, PlayStation, PlayStation 2, iOS 6 and iOS 7), language (English, Français, Español, Deutsch, Русский), appearance, open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
+**Settings.** Language (English, Français, Español, Deutsch, Русский), light or dark appearance (or as in macOS), open at login (a regular macOS login item), menu bar, update check, and the thresholds used by the lists.
 
 **Notifications.** Only for real problems: an app stuck spawning hundreds of processes, a nearly full disk, a hot battery, or an app draining the battery. A click opens the right page; you can turn them off in Settings.
 

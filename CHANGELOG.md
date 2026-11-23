@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0
+
+- **Light and dark only**: the retro styles (Classic Macintosh, Windows 98 and XP, Nintendo, Game Boy, PlayStation 1 and 2, iOS 6 and 7) and the ten color palettes are gone — one clean look, light, dark or as in macOS. A style chosen earlier is simply forgotten.
+- **First launch**: “Allow and scan” stands right under the explanation; the list of folders not to scan folds away under “Don't scan” instead of pushing the button below the window.
+- **Disk**: the lists (Big files, Not used, Duplicates) start at the top — the startup disk card above them is gone (free space is in the sidebar and on Summary). Big files can be ticked and moved to the Trash together. The Share column no longer cuts its percentage.
+- **Cleanup**: Old installers showed the size of the whole Downloads folder after a restart; it shows only the old disk images and packages it would remove. The Journal tab is now called Put Back, which is what it is for.
+- **Clearer check boxes**: ticked ones are filled with the accent and a white tick, so a list shows at a glance what is selected.
+- The big numbers on the Overview and the meters in the sidebar open their page (Processes, Disk, Battery); the sidebar shows each page's shortcut (⌘1…⌘9) on hover.
+- **Faster disk scans**: folders are read with `getattrlistbulk` (names, sizes and dates of dozens of entries per system call instead of a `stat` for every file), and measured folders reach the results in batches instead of a lock per folder. A scan takes about half the time and 40–60% less CPU; measuring cleanup targets and apps is faster too.
+- **Lighter start**: app sizes are remembered between launches (until the app changes, a week at most) — listing apps took ~4 s of CPU at every start, now ~0.2 s. The home folder is not scanned again when MacPilot restarts within an hour of the last scan (after an update, for example).
+
 ## 0.8.3
 
 - **Much lighter in the menu bar**: with the window closed MacPilot used about 3–7% of a core all day, because every monitor kept the window's pace (the process list every 1.5 s, `nettop` every 3 s, the battery every 5 s, `lsof` every 10 s). Hidden, it now reads processes every 10 s, network every 20 s, sensors every 15 s and the battery every 30 s, skips the open ports entirely, and does not lay out pages nobody sees — about 1%. Everything catches up within a quarter of a second when the window opens.

@@ -142,7 +142,7 @@ fn updates(g: &mut Gui, ui: &mut Ui) {
                         Source::Homebrew { .. } => (tr("Update"), tr("Runs `brew upgrade --cask` in the background")),
                         Source::Sparkle => (tr("Open the app"), tr("The app offers the update when it starts")),
                     };
-                    if w::button(ui, label).on_hover_text(hover).clicked() {
+                    if ui.button(label).on_hover_text(hover).clicked() {
                         go = Some(u.clone());
                     }
                 });
@@ -302,7 +302,7 @@ fn detail(g: &mut Gui, ui: &mut Ui) {
             for (p, s) in &l {
                 ui.horizontal(|ui| {
                     let mut on = g.leftover_checked.contains(p);
-                    if ui.checkbox(&mut on, "").changed() {
+                    if ui.add(w::Check(&mut on)).changed() {
                         toggle = Some(p.clone());
                     }
                     ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new(fmt::bytes(*s)).color(w::size_color(ui, *s))));
@@ -409,7 +409,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                 let o = &orphans[row.index()];
                 row.col(|ui| {
                     let mut on = g.orphans_checked.contains(o.key());
-                    if ui.checkbox(&mut on, "").changed() {
+                    if ui.add(w::Check(&mut on)).changed() {
                         toggle = Some(o.key().to_path_buf());
                     }
                 });
@@ -442,7 +442,7 @@ fn leftovers(g: &mut Gui, ui: &mut Ui) {
                 });
                 row.response().context_menu(|ui| {
                     for (p, _) in &o.items {
-                        if w::button(ui, trf("Show {0} in Finder", &[&fmt::path(p)])).clicked() {
+                        if ui.button(trf("Show {0} in Finder", &[&fmt::path(p)])).clicked() {
                             macpilot::trash::reveal_in_finder(p);
                             ui.close();
                         }

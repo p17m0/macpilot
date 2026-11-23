@@ -71,14 +71,14 @@ pub fn folder_checks(g: &mut Gui, ui: &mut Ui) -> bool {
         }
         let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| fmt::path(p));
         folder_row(ui, &name, p, |ui| {
-            if w::button(ui, tr("Remove")).on_hover_text(tr("Scan this folder again")).clicked() {
+            if ui.button(tr("Remove")).on_hover_text(tr("Scan this folder again")).clicked() {
                 g.settings.set_excluded(p, false);
                 changed = true;
             }
         });
     }
     ui.add_space(w::sp::S);
-    if w::button(ui, tr("Add folder…")).clicked() {
+    if ui.button(tr("Add folder…")).clicked() {
         for p in crate::mac::choose_folders(tr("Don't scan"), tr("MacPilot will never open the folders you choose.")) {
             g.settings.set_excluded(&p, true);
             changed = true;
@@ -105,13 +105,15 @@ fn ask(g: &mut Gui, ui: &mut Ui) {
             "To show what takes space and what can be cleaned up, MacPilot reads the names, sizes and dates of the files in your home folder. It never opens what is inside them, sends nothing anywhere and removes nothing without your confirmation.",
         ));
         ui.add_space(w::sp::M);
-        ui.label(RichText::new(tr("Don't scan")).semibold());
-        ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).callout().color(C::dim(ui)));
-        ui.add_space(w::sp::S);
-        if folder_checks(g, ui) {
-            g.save_settings();
-            macpilot::disk::set_excluded(g.settings.excluded_paths());
-        }
+        // The answer first; choosing folders to skip is for those who want to.
+        ui.horizontal_wrapped(|ui| {
+            if w::big_button(ui, tr("Allow and scan"), C::accent(), true).clicked() {
+                g.grant_file_access();
+            }
+            if ui.link(tr("You can change this any time in Settings → Privacy.")).clicked() {
+                g.open_privacy();
+            }
+        });
         ui.add_space(w::sp::M);
         w::note(
             ui,
@@ -121,13 +123,15 @@ fn ask(g: &mut Gui, ui: &mut Ui) {
                 "macOS itself will ask separately about Desktop, Documents, Downloads and iCloud Drive — those are its standard dialogs. Allow the ones you want; MacPilot works with whatever you allow.",
             ),
         );
-        ui.add_space(w::sp::M);
-        ui.horizontal(|ui| {
-            if w::big_button(ui, tr("Allow and scan"), C::accent(), true).clicked() {
-                g.grant_file_access();
-            }
-            if ui.link(tr("You can change this any time in Settings → Privacy.")).clicked() {
-                g.open_privacy();
+        ui.add_space(w::sp::S);
+        let skipped = g.settings.excluded.len();
+        let title = if skipped > 0 { format!("{} · {skipped}", tr("Don't scan")) } else { tr("Don't scan").to_string() };
+        egui::CollapsingHeader::new(RichText::new(title).semibold()).id_salt("dont_scan").default_open(skipped > 0).show(ui, |ui| {
+            ui.label(RichText::new(tr("Switch on the folders MacPilot must never open — not even to measure them.")).callout().color(C::dim(ui)));
+            ui.add_space(w::sp::S);
+            if folder_checks(g, ui) {
+                g.save_settings();
+                macpilot::disk::set_excluded(g.settings.excluded_paths());
             }
         });
     });

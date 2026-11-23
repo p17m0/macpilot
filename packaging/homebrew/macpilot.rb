@@ -2,8 +2,8 @@
 #   brew install --cask p17m0/tap/macpilot
 # The release workflow fills in `version` and `sha256` (scripts/cask.sh) and pushes it to the tap.
 cask "macpilot" do
-  version "0.8.2"
-  sha256 "c0714f96c377e84964087f65dd2ade012e68ee9a23080cf3e83aeaf433978243"
+  version "0.8.3"
+  sha256 "0307df4f26334e538c044cf4b98c84661bdbcce7367974b450655763e829c0af"
 
   url "https://github.com/p17m0/macpilot/releases/download/v#{version}/MacPilot-v#{version}-macos-universal.zip"
   name "MacPilot"

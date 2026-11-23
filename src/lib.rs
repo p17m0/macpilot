@@ -5,6 +5,7 @@ pub mod actionlog;
 pub mod apps;
 pub mod appupdates;
 pub mod battery;
+pub mod bulk;
 pub mod clean;
 pub mod devjunk;
 pub mod dirmap;

@@ -285,6 +285,8 @@ pub struct Gui {
     pub stale: Vec<StaleItem>,
     pub stale_dirty: bool,
     pub stale_checked: HashSet<PathBuf>,
+    /// Large files ticked for the Trash.
+    pub big_checked: HashSet<PathBuf>,
     pub dupes: Option<Arc<DupScan>>,
     /// For each duplicate group (keyed by its first path): the copy to keep.
     pub dupes_keep: HashMap<PathBuf, PathBuf>,
@@ -353,8 +355,8 @@ impl Gui {
             Some(l) => macpilot::i18n::set_lang(l),
             None => settings.apply_lang(),
         }
-        widgets::setup_style(&cc.egui_ctx, settings.style, settings.palette);
-        apply_theme(&cc.egui_ctx, settings.theme, settings.style);
+        widgets::setup_style(&cc.egui_ctx);
+        apply_theme(&cc.egui_ctx, settings.theme);
         let ctx = cc.egui_ctx.clone();
 
         // Processes are collected in the background so the window never stutters.
@@ -557,6 +559,7 @@ impl Gui {
             stale: Vec::new(),
             stale_dirty: true,
             stale_checked: HashSet::new(),
+            big_checked: HashSet::new(),
             dupes: None,
             dupes_keep: HashMap::new(),
             dupes_selected: HashSet::new(),
@@ -619,17 +622,9 @@ impl Gui {
         if std::env::var("MACPILOT_HIDDEN").is_ok() {
             mac::hide_window();
         }
-        if let Ok(st) = std::env::var("MACPILOT_STYLE") {
-            self.settings.style = macpilot::settings::UiStyle::from_code(&st).unwrap_or(macpilot::settings::UiStyle::Standard);
-            self.apply_style();
-        }
-        if let Some(p) = std::env::var("MACPILOT_PALETTE").ok().and_then(|p| macpilot::settings::Palette::from_code(&p)) {
-            self.settings.palette = p;
-            self.apply_style();
-        }
         match std::env::var("MACPILOT_THEME").as_deref() {
-            Ok("dark") => apply_theme(&self.ctx, Theme::Dark, self.settings.style),
-            Ok("light") => apply_theme(&self.ctx, Theme::Light, self.settings.style),
+            Ok("dark") => apply_theme(&self.ctx, Theme::Dark),
+            Ok("light") => apply_theme(&self.ctx, Theme::Light),
             _ => {}
         }
         // MACPILOT_FAKE_UPDATE=9.9.9 (developer screenshots): look as if that version were out.
@@ -1190,6 +1185,7 @@ impl Gui {
         }
         let is_gone = |p: &PathBuf| gone.iter().any(|g| p.starts_with(g));
         self.stale.retain(|i| !is_gone(&i.path));
+        self.big.retain(|(_, p)| !is_gone(p));
         self.junk.retain(|j| !is_gone(&j.path));
         if let Some(o) = &mut self.orphans {
             for x in o.iter_mut() {
@@ -1213,7 +1209,7 @@ impl Gui {
         if self.app_sel.as_ref().is_some_and(is_gone) {
             self.app_sel = None;
         }
-        for set in [&mut self.stale_checked, &mut self.junk_checked, &mut self.orphans_checked, &mut self.leftover_checked] {
+        for set in [&mut self.stale_checked, &mut self.big_checked, &mut self.junk_checked, &mut self.orphans_checked, &mut self.leftover_checked] {
             set.retain(|p| !is_gone(p));
         }
         let to_measure: Vec<usize> =
@@ -1228,11 +1224,11 @@ impl Gui {
     pub fn remeasure(&mut self, i: usize) {
         let Some(t) = self.targets.get_mut(i) else { return };
         t.stat = None;
-        let p = t.path.clone();
+        let (id, p) = (t.id, t.path.clone());
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Msg::Measured(i, disk::measure(&p)));
+            let _ = tx.send(Msg::Measured(i, clean::measure_target(id, &p)));
             ctx.request_repaint();
         });
     }
@@ -1533,12 +1529,6 @@ impl Gui {
         self.changes = Some(result);
     }
 
-    /// Apply the chosen style: colors and fonts, and light or dark where the style decides it.
-    pub fn apply_style(&mut self) {
-        widgets::setup_style(&self.ctx, self.settings.style, self.settings.palette);
-        apply_theme(&self.ctx, self.settings.theme, self.settings.style);
-    }
-
     /// Send a notification unless the same one went out within `every`.
     fn alert(&mut self, id: &str, every: Duration, title: &str, body: &str) {
         if self.notified.get(id).is_some_and(|t| t.elapsed() < every) {
@@ -1694,9 +1684,11 @@ impl Gui {
                 let age = cached.cached_at.map(|t| disk::now_unix() - t).unwrap_or(i64::MAX);
                 let on_battery = macpilot::battery::read().is_some_and(|b| !b.plugged);
                 self.scan = Some(cached);
-                if on_battery && age < 86_400 {
+                // Started again within the hour (an update, a crash): the results are still fresh.
+                let fresh = age < 3600;
+                if !fresh && on_battery && age < 86_400 {
                     self.rescan_when_plugged = true;
-                } else {
+                } else if !fresh {
                     self.rescan = Some(Scan::start(home.clone()));
                 }
                 self.stale_dirty = true;
@@ -1859,11 +1851,11 @@ impl Gui {
     fn handle_shot(&mut self, _ctx: &egui::Context) {}
 }
 
-pub fn apply_theme(ctx: &egui::Context, t: Theme, style: macpilot::settings::UiStyle) {
-    ctx.set_theme(match (style.fixed_dark(), t) {
-        (Some(true), _) | (None, Theme::Dark) => egui::ThemePreference::Dark,
-        (Some(false), _) | (None, Theme::Light) => egui::ThemePreference::Light,
-        (None, Theme::System) => egui::ThemePreference::System,
+pub fn apply_theme(ctx: &egui::Context, t: Theme) {
+    ctx.set_theme(match t {
+        Theme::Dark => egui::ThemePreference::Dark,
+        Theme::Light => egui::ThemePreference::Light,
+        Theme::System => egui::ThemePreference::System,
     });
 }
 
@@ -1959,11 +1951,7 @@ impl eframe::App for Gui {
         egui::Panel::left("nav").exact_size(214.0).resizable(false).frame(widgets::pane_frame(ui)).show(ui, |ui| self.sidebar(ui));
 
         egui::Panel::bottom("status")
-            .frame(if widgets::classic() {
-                egui::Frame::new().fill(C::paper()).stroke(egui::Stroke::new(1.0, C::fg())).inner_margin(egui::Margin::symmetric(24, 8))
-            } else {
-                egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(24, 8))
-            })
+            .frame(egui::Frame::new().fill(C::bg_bar(ui)).inner_margin(egui::Margin::symmetric(24, 8)))
             .show(ui, |ui| self.status_bar(ui));
 
         match self.page {
@@ -2010,31 +1998,46 @@ impl Gui {
             self.version_line(ui, "");
         }
         ui.add_space(w::sp::M);
-        for (p, icon, label) in self.nav_items() {
+        for (i, (p, icon, label)) in self.nav_items().into_iter().enumerate() {
             let badge = match p {
                 Page::Startup => self.startup.as_ref().map(|s| s.iter().filter(|i| i.unwanted && !i.disabled).count()).filter(|n| *n > 0),
                 Page::Settings => self.update.as_ref().map(|_| 1),
                 _ => None,
             };
-            if widgets::nav_item(ui, self.page == p, icon, label, badge).clicked() {
+            let item = widgets::nav_item(ui, self.page == p, icon, label, badge);
+            // The shortcut, so it can be learned.
+            let item = if i < 9 { item.on_hover_text(format!("⌘{}", i + 1)) } else { item };
+            if item.clicked() {
                 self.go_page(p);
             }
         }
+        let mut go = None;
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             let s = self.snap.clone();
             if let Some(b) = self.power.lock().unwrap().battery() {
                 let (value, _) = battery_view::short_state(b);
                 // The meter turns red when the charge is low.
-                widgets::side_meter(ui, tr("Battery"), &value, 1.0 - b.percent as f32 / 100.0, None);
+                if widgets::side_meter(ui, tr("Battery"), &value, 1.0 - b.percent as f32 / 100.0, None).clicked() {
+                    go = Some(Page::Battery);
+                }
             }
             if let Some((avail, total)) = widgets::data_volume(&self.disks) {
                 let r = total.saturating_sub(avail) as f32 / total.max(1) as f32;
-                widgets::side_meter(ui, tr("Disk"), &trf("{0} free", &[&fmt::bytes(avail)]), r, None);
+                if widgets::side_meter(ui, tr("Disk"), &trf("{0} free", &[&fmt::bytes(avail)]), r, None).clicked() {
+                    go = Some(Page::Disk);
+                }
             }
             let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
-            widgets::side_meter(ui, tr("Memory"), &format!("{} / {}", fmt::bytes(s.mem_used), fmt::bytes(s.mem_total)), mem_r, Some(&self.mem_hist));
-            widgets::side_meter(ui, "CPU", &fmt::pct0(s.cpu_total), s.cpu_total / 100.0, Some(&self.cpu_hist));
+            let mem = format!("{} / {}", fmt::bytes(s.mem_used), fmt::bytes(s.mem_total));
+            if widgets::side_meter(ui, tr("Memory"), &mem, mem_r, Some(&self.mem_hist)).clicked()
+                || widgets::side_meter(ui, "CPU", &fmt::pct0(s.cpu_total), s.cpu_total / 100.0, Some(&self.cpu_hist)).clicked()
+            {
+                go = Some(Page::Procs);
+            }
         });
+        if let Some(p) = go {
+            self.go_page(p);
+        }
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
@@ -2114,10 +2117,10 @@ impl Gui {
                     let fill = if c.danger { C::red() } else { C::accent() };
                     let btn =
                         egui::Button::new(RichText::new(&c.button).semibold().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(120.0, 30.0));
-                    if widgets::add_button(ui, ok_enabled, btn).clicked() {
+                    if ui.add_enabled(ok_enabled, btn).clicked() {
                         decision = Some(true);
                     }
-                    if widgets::add_button(ui, true, egui::Button::new(tr("Cancel")).min_size(egui::vec2(90.0, 30.0))).clicked() {
+                    if ui.add_enabled(true, egui::Button::new(tr("Cancel")).min_size(egui::vec2(90.0, 30.0))).clicked() {
                         decision = Some(false);
                     }
                 });

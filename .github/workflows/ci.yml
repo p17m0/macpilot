@@ -26,7 +26,7 @@ jobs:
       - name: Build the app
         run: scripts/bundle.sh
 
-  # Every page in every style at the smallest window size, kept as a build artifact: a look at
+  # Every page in the light and the dark theme at the smallest window size, kept as a build artifact: a look at
   # them catches buttons drawn over text or cut-off columns before a release.
   screenshots:
     runs-on: macos-latest

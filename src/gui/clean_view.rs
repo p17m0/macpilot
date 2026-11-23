@@ -27,7 +27,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     w::segmented(
                         ui,
                         &mut g.clean_mode,
-                        &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk")), (CleanMode::History, tr("History"))],
+                        &[(CleanMode::System, tr("System junk")), (CleanMode::Dev, tr("Developer junk")), (CleanMode::History, tr("Put Back"))],
                     );
                 },
                 |_| {},
@@ -51,7 +51,7 @@ fn history(g: &mut Gui, ui: &mut Ui) {
             ui.label(RichText::new(fmt::bytes(in_trash)).metric().color(C::text(ui)));
             ui.label(RichText::new(tr("Kept for 90 days. Anything still in the Trash can be put back where it was.")).color(C::dim(ui)));
         } else {
-            if w::button(ui, tr("Open the Trash")).clicked() {
+            if ui.button(tr("Open the Trash")).clicked() {
                 macpilot::trash::open_trash();
             }
         }
@@ -94,7 +94,7 @@ fn history(g: &mut Gui, ui: &mut Ui) {
                 });
                 row.col(|ui| match e.state {
                     State::InTrash => {
-                        if w::button(ui, tr("Put Back")).on_hover_text(tr("Move it from the Trash to where it was")).clicked() {
+                        if ui.button(tr("Put Back")).on_hover_text(tr("Move it from the Trash to where it was")).clicked() {
                             back = Some((e.path.clone(), e.at));
                         }
                     }
@@ -181,7 +181,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                     h.col(|ui| {
                         let mut on = all_on;
                         let tip = if all_on { tr("Deselect all") } else { tr("Select all") };
-                        if ui.add_enabled(!cleanable.is_empty(), egui::Checkbox::new(&mut on, "")).on_hover_text(tip).changed() {
+                        if ui.add_enabled(!cleanable.is_empty(), w::Check(&mut on)).on_hover_text(tip).changed() {
                             toggle_all = true;
                         }
                     });
@@ -198,7 +198,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                         row.col(|ui| {
                             if t.cleanable() {
                                 let mut on = g.clean_checked.contains(t.id);
-                                if ui.checkbox(&mut on, "").changed() {
+                                if ui.add(w::Check(&mut on)).changed() {
                                     toggle = Some(t.id);
                                 }
                             }
@@ -233,7 +233,7 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                             ui.add(egui::Label::new(RichText::new(txt).color(color)).selectable(false));
                         });
                         row.col(|ui| {
-                            if w::button(ui, tr("Open")).clicked() {
+                            if ui.button(tr("Open")).clicked() {
                                 open = Some(i);
                             }
                         });
@@ -242,15 +242,15 @@ fn system(g: &mut Gui, ui: &mut Ui) {
                             toggle = Some(t.id);
                         }
                         resp.context_menu(|ui| {
-                            if t.cleanable() && w::add_button(ui, size_of(t) > 0, egui::Button::new(tr("Clean only this"))).clicked() {
+                            if t.cleanable() && ui.add_enabled(size_of(t) > 0, egui::Button::new(tr("Clean only this"))).clicked() {
                                 clean_now = Some(vec![i]);
                                 ui.close();
                             }
-                            if w::button(ui, tr("Open")).clicked() {
+                            if ui.button(tr("Open")).clicked() {
                                 open = Some(i);
                                 ui.close();
                             }
-                            if w::button(ui, tr("Show in Finder")).clicked() {
+                            if ui.button(tr("Show in Finder")).clicked() {
                                 macpilot::trash::reveal_in_finder(&t.path);
                                 ui.close();
                             }
@@ -574,7 +574,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                 let j = &g.junk[row.index()];
                 row.col(|ui| {
                     let mut on = g.junk_checked.contains(&j.path);
-                    if ui.checkbox(&mut on, "").changed() {
+                    if ui.add(w::Check(&mut on)).changed() {
                         toggle = Some(j.path.clone());
                     }
                 });
@@ -604,7 +604,7 @@ fn dev(g: &mut Gui, ui: &mut Ui) {
                     );
                 });
                 row.response().context_menu(|ui| {
-                    if w::button(ui, tr("Show in Finder")).clicked() {
+                    if ui.button(tr("Show in Finder")).clicked() {
                         macpilot::trash::reveal_in_finder(&j.path);
                         ui.close();
                     }

@@ -411,9 +411,10 @@ fn needs_guard(p: &Path) -> bool {
 /// Directory entries with metadata (symlinks not followed). Reading guarded folders happens on a
 /// helper thread with a timeout; if macOS blocks, the folder is treated as not accessible.
 pub fn read_entries(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsString, fs::Metadata)>> {
-    fn read(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsString, fs::Metadata)>> {
-        Ok(fs::read_dir(p)?.flatten().filter_map(|e| e.metadata().ok().map(|m| (e.path(), e.file_name(), m))).collect())
-    }
+    guarded(p, |p| Ok(fs::read_dir(p)?.flatten().filter_map(|e| e.metadata().ok().map(|m| (e.path(), e.file_name(), m))).collect()))
+}
+
+fn guarded<T: Send + 'static>(p: &Path, read: fn(&Path) -> std::io::Result<T>) -> std::io::Result<T> {
     if is_excluded(p) {
         return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "excluded in MacPilot settings"));
     }
@@ -435,11 +436,33 @@ pub fn read_entries(p: &Path) -> std::io::Result<Vec<(PathBuf, std::ffi::OsStrin
 }
 
 fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
+    let mut done = Vec::new();
+    let st = walk_in(s, path, dir_mtime, &mut done);
+    flush(s, &mut done);
+    st
+}
+
+/// Measured folders go into the shared map in batches: one lock per folder kept a dozen threads
+/// waiting on each other.
+type Measured = Vec<(PathBuf, DirStat)>;
+
+fn flush(s: &ScanShared, done: &mut Measured) {
+    if s.keep_dirs && !done.is_empty() && !s.cancel.load(Ordering::Relaxed) {
+        let mut dirs = s.dirs.lock().unwrap();
+        for (p, st) in done.drain(..) {
+            dirs.insert(&p, st);
+        }
+    }
+    done.clear();
+}
+
+fn walk_in(s: &ScanShared, path: &Path, dir_mtime: i64, done: &mut Measured) -> DirStat {
     // Excluded folders are skipped quietly (they are not "no access").
     if s.cancel.load(Ordering::Relaxed) || is_excluded(path) {
         return DirStat::default();
     }
-    let rd = match read_entries(path) {
+    // Names with sizes and dates in one call per few dozen entries (see `bulk`).
+    let rd = match guarded(path, crate::bulk::read) {
         Ok(rd) => rd,
         Err(_) => {
             s.errors.fetch_add(1, Ordering::Relaxed);
@@ -449,22 +472,23 @@ fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
     // Adding or removing an entry changes the folder itself — that counts as activity too.
     let mut st = DirStat { modified: dir_mtime, used: dir_mtime, ..Default::default() };
     let mut subdirs = Vec::new();
-    // Metadata of directory entries does not follow symlinks, so nothing is counted twice.
-    for (path, _, md) in rd {
-        if md.is_dir() {
+    // Directory entries do not follow symlinks, so nothing is counted twice.
+    for e in rd {
+        let path = path.join(&e.name);
+        if e.is_dir {
             if !skip_dir(&path) {
-                subdirs.push((path, md.mtime()));
+                subdirs.push((path, e.mtime));
             }
             continue;
         }
-        let size = alloc_size(&md);
-        if md.nlink() > 1 && !s.inodes.lock().unwrap().insert((md.dev(), md.ino())) {
+        let size = e.alloc;
+        if e.nlink > 1 && !s.inodes.lock().unwrap().insert((e.dev, e.ino)) {
             continue; // another hard link to a file we already counted
         }
-        let used = used_time(&md);
+        let used = e.atime.max(e.mtime);
         st.size += size;
         st.files += 1;
-        st.modified = st.modified.max(md.mtime());
+        st.modified = st.modified.max(e.mtime);
         st.used = st.used.max(used);
         let media = is_media(&path);
         if media {
@@ -472,7 +496,7 @@ fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
         }
         if size >= TRACK_FILE && s.keep_dirs {
             let mut big = s.big.lock().unwrap();
-            big.push(FileRec { size, path, modified: md.mtime(), used, media });
+            big.push(FileRec { size, path, modified: e.mtime, used, media });
             if big.len() > TRACK_KEEP * 2 {
                 big.sort_by_key(|a| std::cmp::Reverse(a.size));
                 big.truncate(TRACK_KEEP);
@@ -481,10 +505,29 @@ fn walk(s: &ScanShared, path: &Path, dir_mtime: i64) -> DirStat {
     }
     s.files.fetch_add(st.files, Ordering::Relaxed);
     s.bytes.fetch_add(st.size, Ordering::Relaxed);
-    let sub = subdirs.par_iter().map(|(d, mt)| walk(s, d, *mt)).reduce(DirStat::default, DirStat::merge);
+    let (sub, mut rest) = subdirs
+        .par_iter()
+        .fold(
+            || (DirStat::default(), Vec::new()),
+            |(acc, mut v), (d, mt)| {
+                let st = walk_in(s, d, *mt, &mut v);
+                if v.len() >= 1024 {
+                    flush(s, &mut v);
+                }
+                (acc.merge(st), v)
+            },
+        )
+        .reduce(
+            || (DirStat::default(), Vec::new()),
+            |(a, mut va), (b, mut vb)| {
+                va.append(&mut vb);
+                (a.merge(b), va)
+            },
+        );
     st = st.merge(sub);
-    if s.keep_dirs && !s.cancel.load(Ordering::Relaxed) {
-        s.dirs.lock().unwrap().insert(path, st);
+    if s.keep_dirs {
+        done.append(&mut rest);
+        done.push((path.to_path_buf(), st));
     }
     st
 }
@@ -1059,6 +1102,35 @@ mod tests {
         let s = Scan::load_cache(&home()).expect("run MacPilot once to create the cache");
         let n = s.shared.dirs.lock().unwrap().len();
         println!("{n} folders loaded in {:?}", t.elapsed());
+    }
+
+    /// Speed of a full walk: `MACPILOT_BENCH=~/Dev:~/Library/Caches cargo test --release --lib bench_walk -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench_walk() {
+        for p in std::env::var("MACPILOT_BENCH").unwrap_or_default().split(':').filter(|p| !p.is_empty()) {
+            let p = PathBuf::from(p.replacen('~', &home().to_string_lossy(), 1));
+            let s = ScanShared::new();
+            let t = std::time::Instant::now();
+            let cpu = || {
+                let mut u: libc::rusage = unsafe { std::mem::zeroed() };
+                unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut u) };
+                let tv = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
+                tv(u.ru_utime) + tv(u.ru_stime)
+            };
+            let c0 = cpu();
+            let st = pool().install(|| walk(&s, &p, 0));
+            println!(
+                "{}: {} bytes, {} files, {} folders, {} errors — {:?}, {:.2} s CPU",
+                p.display(),
+                st.size,
+                st.files,
+                s.dirs.lock().unwrap().len(),
+                s.errors.load(Ordering::Relaxed),
+                t.elapsed(),
+                cpu() - c0
+            );
+        }
     }
 
     /// Excluded folders are never opened: not by the scan, measuring, listing or the duplicate finder.

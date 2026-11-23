@@ -375,8 +375,18 @@ fn recommendations(g: &Gui) -> Vec<Rec> {
     out
 }
 
+/// A big number with a line under it and a sparkline or a bar.
 pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f32, hist: Option<&std::collections::VecDeque<f32>>) {
-    w::card(ui, |ui| {
+    card_with(ui, title, value, sub, ratio, hist, false);
+}
+
+/// [`stat_card`] that opens the page with the details when clicked.
+fn link_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f32, hist: Option<&std::collections::VecDeque<f32>>) -> bool {
+    card_with(ui, title, value, sub, ratio, hist, true)
+}
+
+fn card_with(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f32, hist: Option<&std::collections::VecDeque<f32>>, link: bool) -> bool {
+    let frame = w::card_frame(ui).show(ui, |ui| {
         ui.set_min_width(ui.available_width());
         ui.label(RichText::new(title).color(C::dim(ui)));
         // The big number shrinks to fit a narrow card instead of being cut ("free 30…").
@@ -400,6 +410,14 @@ pub fn stat_card(ui: &mut Ui, title: &str, value: String, sub: String, ratio: f3
             None => ui.add_space(w::sp::XXL),
         }
     });
+    if !link {
+        return false;
+    }
+    let resp = frame.response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    if resp.hovered() {
+        ui.painter().rect_stroke(resp.rect, 10, egui::Stroke::new(1.0, C::accent()), egui::StrokeKind::Inside);
+    }
+    resp.clicked()
 }
 
 pub fn show(g: &mut Gui, ui: &mut Ui) {
@@ -427,15 +445,18 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         cpu_sub += &format!(" · {}", trf("fans {0}", &[&fmt::rpm(fastest)]));
                     }
                 }
+                let mut go = None;
                 ui.columns(4, |cols| {
-                    stat_card(&mut cols[0], "CPU", fmt::pct0(s.cpu_total), cpu_sub, s.cpu_total / 100.0, Some(&g.cpu_hist));
+                    if link_card(&mut cols[0], "CPU", fmt::pct0(s.cpu_total), cpu_sub, s.cpu_total / 100.0, Some(&g.cpu_hist)) {
+                        go = Some(Page::Procs);
+                    }
                     let mem_r = s.mem_used as f32 / s.mem_total.max(1) as f32;
                     let pressure = match s.pressure {
                         4 => tr("pressure: critical"),
                         2 => tr("pressure: high"),
                         _ => tr("pressure: normal"),
                     };
-                    stat_card(
+                    if link_card(
                         &mut cols[1],
                         tr("Memory"),
                         fmt::bytes(s.mem_used),
@@ -448,29 +469,38 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                             mem_r.min(0.7)
                         },
                         Some(&g.mem_hist),
-                    );
+                    ) {
+                        go = Some(Page::Procs);
+                    }
                     if let Some((avail, total)) = w::data_volume(&g.disks) {
                         let used = total.saturating_sub(avail);
-                        stat_card(
+                        if link_card(
                             &mut cols[2],
                             tr("Disk"),
                             trf("{0} free", &[&fmt::bytes(avail)]),
                             trf("{0} of {1} used", &[&fmt::bytes(used), &fmt::bytes(total)]),
                             used as f32 / total.max(1) as f32,
                             None,
-                        );
+                        ) {
+                            go = Some(Page::Disk);
+                        }
                     }
                     let groups = s.groups();
                     let apps = groups.iter().filter(|g| g.app.is_some()).count();
-                    stat_card(
+                    if link_card(
                         &mut cols[3],
                         tr("Processes"),
                         s.procs.len().to_string(),
                         trf("{0} running", &[&fmt::n(apps as u64, fmt::Noun::App)]),
                         0.0,
                         None,
-                    );
+                    ) {
+                        go = Some(Page::Procs);
+                    }
                 });
+                if let Some(p) = go {
+                    g.go_page(p);
+                }
 
                 ui.add_space(w::sp::L);
                 let mut quick = false;
@@ -515,7 +545,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                         ui.set_min_width(ui.available_width());
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 40.0), egui::Sense::hover());
-                            ui.painter().rect_filled(rect, w::rad(3), r.color);
+                            ui.painter().rect_filled(rect, 3, r.color);
                             // The button takes its room first; the text wraps in what is left.
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if w::plain_button(ui, r.button).clicked() {

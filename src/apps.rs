@@ -59,6 +59,10 @@ fn app_dirs() -> Vec<PathBuf> {
 
 /// Details of one app bundle. `spot_used` is the last use Spotlight knows of, if any.
 pub fn info(p: &Path, spot_used: Option<i64>) -> AppInfo {
+    info_sized(p, spot_used, None)
+}
+
+fn info_sized(p: &Path, spot_used: Option<i64>, size: Option<u64>) -> AppInfo {
     let xml = crate::plist::read_xml(&p.join("Contents/Info.plist")).unwrap_or_default();
     let bundle_id = crate::plist::string(&xml, "CFBundleIdentifier").unwrap_or_default();
     let version = crate::plist::string(&xml, "CFBundleShortVersionString").unwrap_or_default();
@@ -70,7 +74,58 @@ pub fn info(p: &Path, spot_used: Option<i64>) -> AppInfo {
         (a, b) => a.or(b),
     };
     let protected = bundle_id == "com.apple.Safari" || p.starts_with("/System");
-    AppInfo { path: p.to_path_buf(), name, bundle_id, version, size: crate::disk::measure(p).size, last_used, protected }
+    let size = size.unwrap_or_else(|| crate::disk::measure(p).size);
+    AppInfo { path: p.to_path_buf(), name, bundle_id, version, size, last_used, protected }
+}
+
+/// Sizes of app bundles from earlier runs. Measuring every bundle stats hundreds of thousands of
+/// files (seconds of CPU at each start); a size is reused while the bundle, its Contents and its
+/// Info.plist keep their modification times (an update replaces at least one), and for a week at most.
+mod size_cache {
+    use std::collections::HashMap;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::{Path, PathBuf};
+
+    const MAX_AGE: i64 = 7 * 86_400;
+
+    fn path() -> PathBuf {
+        crate::home().join("Library/Caches/MacPilot/app-sizes.tsv")
+    }
+
+    pub fn stamp(bundle: &Path) -> Option<u64> {
+        let mut h = 0u64;
+        for p in [bundle.to_path_buf(), bundle.join("Contents"), bundle.join("Contents/Info.plist")] {
+            let m = std::fs::metadata(p).ok()?;
+            let t = (m.mtime() as u64).wrapping_mul(1_000_000_007).wrapping_add(m.mtime_nsec() as u64);
+            h = h.rotate_left(21) ^ t;
+        }
+        Some(h)
+    }
+
+    /// path → (stamp, size, when measured); entries older than a week are dropped.
+    pub fn load() -> HashMap<PathBuf, (u64, u64, i64)> {
+        let now = crate::disk::now_unix();
+        let text = std::fs::read_to_string(path()).unwrap_or_default();
+        text.lines()
+            .filter_map(|l| {
+                let mut f = l.splitn(4, '\t');
+                let (stamp, at, size, p) = (f.next()?.parse().ok()?, f.next()?.parse::<i64>().ok()?, f.next()?.parse().ok()?, f.next()?);
+                (now - at < MAX_AGE).then(|| (PathBuf::from(p), (stamp, size, at)))
+            })
+            .collect()
+    }
+
+    pub fn save(entries: &[(PathBuf, u64, u64, i64)]) {
+        let text: String = entries.iter().map(|(p, stamp, size, at)| format!("{stamp}\t{at}\t{size}\t{}\n", p.display())).collect();
+        let p = path();
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = p.with_extension("tmp");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(tmp, p);
+        }
+    }
 }
 
 /// All installed apps (in /Applications and ~/Applications, one folder level deep).
@@ -91,7 +146,21 @@ pub fn list() -> Vec<AppInfo> {
         }
     }
     let spot = spotlight_last_used();
-    let mut apps: Vec<AppInfo> = crate::disk::apps_pool().install(|| bundles.par_iter().map(|p| info(p, spot.get(p).copied())).collect());
+    let cached = size_cache::load();
+    let now = crate::disk::now_unix();
+    let found: Vec<(AppInfo, Option<u64>, i64)> = crate::disk::apps_pool().install(|| {
+        bundles
+            .par_iter()
+            .map(|p| {
+                let stamp = size_cache::stamp(p);
+                let hit = cached.get(p).filter(|(s, _, _)| Some(*s) == stamp);
+                let at = hit.map_or(now, |(_, _, at)| *at);
+                (info_sized(p, spot.get(p).copied(), hit.map(|(_, size, _)| *size)), stamp, at)
+            })
+            .collect()
+    });
+    size_cache::save(&found.iter().filter_map(|(a, stamp, at)| Some((a.path.clone(), (*stamp)?, a.size, *at))).collect::<Vec<_>>());
+    let mut apps: Vec<AppInfo> = found.into_iter().map(|(a, _, _)| a).collect();
     apps.sort_by_key(|a| std::cmp::Reverse(a.size));
     apps
 }

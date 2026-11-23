@@ -153,19 +153,24 @@ pub fn measure_all(targets: &[Target], tx: Sender<(usize, DirStat)>) {
     std::thread::spawn(move || {
         crate::background_qos();
         for (i, p) in paths {
-            let st = if !disk::present(&p) {
-                DirStat::default()
-            } else if ids[i] == "installers" {
-                let found = old_installers(&p, disk::now_unix());
-                DirStat { size: found.iter().map(|f| f.1).sum(), files: found.len() as u64, ..Default::default() }
-            } else {
-                disk::measure(&p)
-            };
-            if tx.send((i, st)).is_err() {
+            if tx.send((i, measure_target(ids[i], &p))).is_err() {
                 break;
             }
         }
     });
+}
+
+/// What cleaning the target `id` at `path` would move to the Trash. Old installers are only the
+/// matching files in the folder, not the whole folder.
+pub fn measure_target(id: &str, path: &std::path::Path) -> DirStat {
+    if !disk::present(path) {
+        DirStat::default()
+    } else if id == "installers" {
+        let found = old_installers(path, disk::now_unix());
+        DirStat { size: found.iter().map(|f| f.1).sum(), files: found.len() as u64, ..Default::default() }
+    } else {
+        disk::measure(path)
+    }
 }
 
 /// Installers older than this many days are offered for removal.

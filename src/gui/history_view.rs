@@ -54,7 +54,7 @@ pub fn show(g: &mut Gui, ui: &mut Ui) {
                     );
                 },
                 |ui| {
-                    if w::add_button(ui, has_any, egui::Button::new(tr("Clear history")).corner_radius(w::button_radius())).clicked() {
+                    if ui.add_enabled(has_any, egui::Button::new(tr("Clear history")).corner_radius(w::button_radius())).clicked() {
                         clear = true;
                     }
                 },

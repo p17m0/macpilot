@@ -132,7 +132,7 @@ fn toolbar(g: &mut Gui, ui: &mut Ui) {
             g.filter.clear();
         }
         ui.add_space(w::sp::S);
-        ui.checkbox(&mut g.only_mine, tr("Only mine"));
+        w::check_label(ui, &mut g.only_mine, tr("Only mine"));
     });
 }
 
@@ -439,7 +439,7 @@ fn ctx_menu(ui: &mut Ui, sel: &Sel, is_app: bool, out: &mut Option<(Sel, CtxActi
     ];
     for (label, a, red) in items {
         let text = if red { RichText::new(label).color(C::red()) } else { RichText::new(label) };
-        if w::button(ui, text).clicked() {
+        if ui.button(text).clicked() {
             *out = Some((sel.clone(), a));
             ui.close();
         }
@@ -712,10 +712,10 @@ fn action_buttons(g: &mut Gui, ui: &mut Ui, safety: Safety, is_app: bool, single
         }
         if let Some(p) = single {
             let label = if p.stopped { tr("Resume") } else { tr("Pause") };
-            let r =
-                w::add_button(ui, safety == Safety::User, egui::Button::new(label).corner_radius(w::button_radius()).min_size(egui::vec2(0.0, 32.0)))
-                    .on_hover_text(tr("Freeze the process for a while (it stops using CPU), then resume it."))
-                    .on_disabled_hover_text(tr("Only your own processes can be paused: freezing a system one can hang the Mac."));
+            let r = ui
+                .add_enabled(safety == Safety::User, egui::Button::new(label).corner_radius(w::button_radius()).min_size(egui::vec2(0.0, 32.0)))
+                .on_hover_text(tr("Freeze the process for a while (it stops using CPU), then resume it."))
+                .on_disabled_hover_text(tr("Only your own processes can be paused: freezing a system one can hang the Mac."));
             if r.clicked() {
                 let sig = if p.stopped { libc::SIGCONT } else { libc::SIGSTOP };
                 match procs::send_signal(p.pid, sig) {
